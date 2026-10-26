@@ -19,6 +19,9 @@ The current concept and roadmap are recorded in:
 - [Research and planning/Funeral_Spaces_Platform_Concept_and_Strategy.docx](Research%20and%20planning/Funeral_Spaces_Platform_Concept_and_Strategy.docx) — source concept document.
 - [Research and planning/Funeral Spaces - Society Space Product Requirements and Design.md](Research%20and%20planning/Funeral%20Spaces%20-%20Society%20Space%20Product%20Requirements%20and%20Design.md) — current visual-first Society Space requirements/design proposal; read the latest version before changing it.
 - [Research and planning/Learning/Mobile App Learning Journal.md](Research%20and%20planning/Learning/Mobile%20App%20Learning%20Journal.md) — learning concepts and project decisions for the user.
+- [mobile/lib/main.dart](mobile/lib/main.dart) — initial Flutter login screen implementation.
+- [mobile/test/widget_test.dart](mobile/test/widget_test.dart) — widget tests for login screen structure and interactions.
+- [mobile/web/index.html](mobile/web/index.html) — Flutter web entry point added for visual browser previews.
 
 ## Current plan and decisions
 
@@ -29,6 +32,10 @@ The current concept and roadmap are recorded in:
 - Current provisional mobile recommendation: Flutter/Dart. Provisional backend direction: NestJS/TypeScript modular monolith and PostgreSQL. SQLite is a possible on-device option only if offline needs are validated. These are recommendations, not final commitments.
 - Strong mobile UX is essential: clear workflows, low friction, accessible controls, visible next steps, calm language, and trust/traceability.
 - The design proposal is not yet approved. It includes proposed green/ivory/amber colors and screens/wireframes, but sign-in, user roles, offline behavior, language needs, permissions, and local society workflow need review and validation.
+- A Flutter mobile app scaffold now exists in `mobile/` with Android and iOS targets. Its initial home screen reproduces the login screen from `Screen designs/Screen mock up-exported.pdf`, including EverBond branding, fields, password visibility, social buttons, administrator contact and privacy note. `flutter analyze` and `flutter test` passed on 26 October 2026.
+- Flutter web support has also been enabled to preview the same shared UI in a browser. A static web build succeeded; preview server is available at `http://127.0.0.1:5321` while its terminal process is running. This is a visual preview only and does not replace testing on Android/iOS devices.
+- Login UI validation is local only. Real account sign-in, password recovery, Google/Facebook authentication, and administrator contact are not connected to a backend/provider and must not be represented as production authentication.
+- The mockup brands the screen “EverBond” while the platform concept is “Funeral Spaces”; confirm their intended relationship before final brand decisions or release.
 - The user is new to the suggested stack and wants to learn. Before any code change or implementation, explain what will be done, why, and relevant unfamiliar concepts in beginner-friendly terms. Update the learning journal with meaningful milestones.
 - The user expects thorough South African-context research, no unsupported assumptions, clear fact/assumption distinctions, and explicit uncertainty. When unsure, state that alternative approaches are being considered/requested and present options with trade-offs.
 - The user earlier requested approval before research points are added to the research document. Present findings and ask whether they are worth noting; do not silently treat new findings as approved.
@@ -47,13 +54,15 @@ The current concept and roadmap are recorded in:
 2. Discussed cross-platform support. User confirmed Android and iOS are both intended; future design and build should preserve both.
 3. Created the Mobile App Learning Journal and established that explanations should precede implementation.
 4. Created persistent project guidelines for research, learning, UX, platform parity, and privacy boundaries.
-5. Drafted the Society Space product requirements and design proposal with workflows, screen sketches, proposed color direction, sign-in considerations, navigation, buttons, gesture/sheet/dialog patterns, requirements, and cross-Space architecture. It remains a proposal for review; no code has been implemented as part of this design work.
+5. Drafted the Society Space product requirements and design proposal with workflows, screen sketches, proposed color direction, sign-in considerations, navigation, buttons, gesture/sheet/dialog patterns, requirements, and cross-Space architecture. It remains a proposal for review.
 6. User moved/created the current workspace at `~/Developer/Funeral Enablement Suite/`. The former Documents path no longer resolved on 26 October 2026. Continue from the current workspace and never overwrite the older location without checking.
-7. This handoff was created to preserve portable project context; the ChatGPT/Copilot chat transcript itself is managed by VS Code, not embedded here.
+7. Reviewed the exported login screen at `Screen designs/Screen mock up-exported.pdf` and created a Flutter Android/iOS scaffold in `mobile/`. The first Flutter screen approximates the export; required-field validation and password visibility work. Authentication entry points are explicit placeholders. `flutter analyze` and `flutter test` passed.
+8. Added Flutter web support for quick visual preview. Static build passed and was served at `http://127.0.0.1:5321`; screenshot reviewed at a 440 × 956 viewport. The preview server is a temporary local process and can stop when its terminal closes.
+9. This handoff was created to preserve portable project context; the ChatGPT/Copilot chat transcript itself is managed by VS Code, not embedded here.
 
 ## Immediate next step
 
-Review the open decisions in Section 13 of the Society Space design proposal, starting with navigation and visual direction. Then decide whether to revise the written requirements or create a clickable low-fidelity prototype. Before any prototype or code implementation, explain the plan and update the learning journal.
+Review the open decisions in Section 13 of the Society Space design proposal, confirm EverBond vs. Funeral Spaces brand relationship, then decide authentication method and backend. Before any further implementation, explain the plan and update the learning journal. The current login UI is ready for visual review on Android/iOS, but must not be treated as production authentication.
 
 ## How to continue in another workspace/chat
 
