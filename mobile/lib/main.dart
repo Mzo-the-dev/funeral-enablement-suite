@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'access_flow.dart';
+
 void main() {
   runApp(const FuneralSpacesApp());
 }
@@ -88,7 +90,9 @@ class _LoginScreenState extends State<LoginScreen> {
           builder: (context, constraints) => SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(32, 14, 32, 24),
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight - 38),
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight - 38,
+              ),
               child: IntrinsicHeight(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -138,7 +142,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             decoration: _inputDecoration(
                               hintText: 'Enter your email or username',
                             ),
-                            validator: (value) => value == null || value.trim().isEmpty
+                            validator: (value) =>
+                                value == null || value.trim().isEmpty
                                 ? 'Enter your email or username'
                                 : null,
                           ),
@@ -181,6 +186,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
+                              key: const Key('forgot-password-button'),
                               onPressed: () =>
                                   _showNotConnectedMessage('Password recovery'),
                               style: TextButton.styleFrom(
@@ -259,8 +265,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     TextButton(
-                      onPressed: () =>
-                          _showNotConnectedMessage('Administrator contact'),
+                      key: const Key('open-registration'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const RegistrationScreen(),
+                        ),
+                      ),
                       style: TextButton.styleFrom(
                         foregroundColor: AppColors.forest,
                         minimumSize: const Size(48, 44),
@@ -269,7 +279,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: const Text('Contact your administrator'),
+                      child: const Text("Don't have an account? Sign up"),
                     ),
                     const Spacer(),
                     const SizedBox(height: 26),
@@ -349,11 +359,7 @@ class _EverBondBrand extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const SizedBox(
-          width: 88,
-          height: 66,
-          child: _EverBondMark(),
-        ),
+        const SizedBox(width: 88, height: 66, child: _EverBondMark()),
         const SizedBox(width: 16),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,7 +419,11 @@ class _EverBondMarkPainter extends CustomPainter {
 
     final centerY = size.height / 2;
     final endX = size.width - 3;
-    canvas.drawLine(Offset(size.width * 0.47, centerY), Offset(endX, centerY), linePaint);
+    canvas.drawLine(
+      Offset(size.width * 0.47, centerY),
+      Offset(endX, centerY),
+      linePaint,
+    );
 
     for (var index = 0; index < 6; index++) {
       final startY = 4.0 + index * (size.height - 8) / 5;
@@ -458,24 +468,20 @@ class _OrDivider extends StatelessWidget {
   const _OrDivider();
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'or continue with',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.muted,
-                  fontSize: 13,
-                ),
-          ),
+  Widget build(BuildContext context) => Row(
+    children: [
+      const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          'or continue with',
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: AppColors.muted, fontSize: 13),
         ),
-        const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
-      ],
-    );
-  }
+      ),
+      const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
+    ],
+  );
 }
 
 class _SocialSignInButton extends StatelessWidget {
@@ -490,81 +496,67 @@ class _SocialSignInButton extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 56,
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        icon: icon,
-        label: Text(label),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.ink,
-          backgroundColor: AppColors.white,
-          side: const BorderSide(color: AppColors.border),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(9),
-          ),
-          textStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
+  Widget build(BuildContext context) => SizedBox(
+    height: 56,
+    child: OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: icon,
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.ink,
+        backgroundColor: AppColors.white,
+        side: const BorderSide(color: AppColors.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _GoogleMark extends StatelessWidget {
   const _GoogleMark();
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 22,
-      height: 22,
-      child: Center(
-        child: RichText(
-          text: const TextSpan(
-            style: TextStyle(
-              fontFamily: 'Arial',
-              fontWeight: FontWeight.w700,
-              fontSize: 20,
-            ),
-            children: [
-              TextSpan(text: 'G', style: TextStyle(color: Color(0xFF4285F4))),
-            ],
-          ),
+  Widget build(BuildContext context) => const SizedBox(
+    width: 22,
+    height: 22,
+    child: Center(
+      child: Text(
+        'G',
+        style: TextStyle(
+          color: Color(0xFF4285F4),
+          fontFamily: 'Arial',
+          fontWeight: FontWeight.w700,
+          fontSize: 20,
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _FacebookMark extends StatelessWidget {
   const _FacebookMark();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 21,
-      height: 21,
-      decoration: const BoxDecoration(
-        color: Color(0xFF1877F2),
-        shape: BoxShape.circle,
+  Widget build(BuildContext context) => Container(
+    width: 21,
+    height: 21,
+    decoration: const BoxDecoration(
+      color: Color(0xFF1877F2),
+      shape: BoxShape.circle,
+    ),
+    alignment: Alignment.bottomCenter,
+    child: const Text(
+      'f',
+      style: TextStyle(
+        color: AppColors.white,
+        fontFamily: 'Arial',
+        fontWeight: FontWeight.w700,
+        fontSize: 19,
+        height: 1.05,
       ),
-      alignment: Alignment.bottomCenter,
-      child: const Text(
-        'f',
-        style: TextStyle(
-          color: AppColors.white,
-          fontFamily: 'Arial',
-          fontWeight: FontWeight.w700,
-          fontSize: 19,
-          height: 1.05,
-        ),
-      ),
-    );
-  }
+    ),
+  );
 }
 
 class _PrivacyNote extends StatelessWidget {
@@ -582,12 +574,12 @@ class _PrivacyNote extends StatelessWidget {
           semanticLabel: 'Locked',
         ),
         const SizedBox(width: 7),
-        Text(
-          "Your society's information, kept private.",
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.muted,
-                fontSize: 12,
-              ),
+        Flexible(
+          child: Text(
+            "Your society's information, kept private.",
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: AppColors.muted, fontSize: 12),
+          ),
         ),
       ],
     );
