@@ -157,37 +157,60 @@ The wireframes are illustrative phone layouts, not final pixel designs. `[...]` 
 │                              │
 │  Password             [Show] │
 │  [________________________]  │
-│  [Forgot password?]          │
 │                              │
-│  [         Sign in         ] │
+│  [       Log in             ] │
 │                              │
-│  Need access? Contact your   │
-│  society administrator       │
-│  Privacy   Help              │
+│  [Sign up]                   │
+│  Privacy                     │
 └──────────────────────────────┘
 ```
 
-**Behavior:** show/hide password control with accessible label; validate without clearing fields; generic sign-in error that does not reveal whether an account exists; loading and network-failure states; password reset; optional invite/activation flow. Offer another authentication method if adopted. Do not assume SMS one-time codes are the only option; decide after reviewing user access patterns, device sharing, recovery needs, costs, and security. Require stronger verification for sensitive actions only after the security approach is designed and tested.
+**Behavior:** an existing user signs in with their username/email and password; their email address or cell phone was verified during registration. Screen 1 presents the username/email field, password field, login button, and a **Sign up** link. Do not send an OTP during ordinary sign-in. New users follow the sign-up flow, complete the registration form, and submit it for account creation. Only after account details are successfully registered does the service send a single-use, expiring OTP to the user's selected email or cell phone for verification. Registration asks for name, surname, location, selected Space, the selected Space's additional questions, email, cell phone, address, preferred name, password, and password confirmation. Space-specific questions are managed by the selected Space; the current mobile questions are prototype examples, not final business rules. A registration is not complete or trusted until the post-creation OTP is verified.
 
-**Unresolved:** sign-in identifier and verification method (email, phone, username, passkey, authenticator, or a combination), account recovery process, shared-device behavior, and whether members need self-registration. The concept describes organizational Spaces; open public sign-up is not assumed.
+**Confirmed by user (26 October 2026; updated):** use username/email and password for sign-in after registration verification; do not send OTP at sign-in. During sign-up, users provide the stated profile, contact, Space-selection, and password fields. After successful account registration, verify either the cell phone or email using OTP. The app preview only models this sequence; real account creation and code delivery require a backend/provider. The previously confirmed account-versus-membership separation, invitations/Spaces landing screen, English pilot, and SMS/email verification channels remain in effect. Password recovery, session policy, identity/OTP provider, role boundaries, offline requirements, member-data visibility, and final Space-specific questions still require decisions.
 
 ### 6.2 Society selection / Spaces switcher
 
 ```text
 ┌──────────────────────────────┐
-│ Select a workspace           │
+│ Your Spaces             [👤] │
 │                              │
-│ [ Society name         > ]   │
-│   Your role: Treasurer       │
+│ [Invitation from: Society A] │
+│ [Review invitation] [Later]  │
 │                              │
-│ [ Join with invitation ]     │
+│ Your Spaces                  │
+│ No Spaces yet                │
 │                              │
-│ Only workspaces you are      │
-│ authorized to access appear. │
+│ Find a Space to join          │
+│ [Search by name / code]      │
+│ [Available Space result  >]  │
+│                              │
+│ Home   Members   ...          │
 └──────────────────────────────┘
 ```
 
-If a user has one workspace, it may open directly after sign-in while keeping a visible workspace switcher in the app bar. Joining by invitation should verify the invite and show the society identity before accepting. Later Spaces can be listed here, with explicit labels and permissions.
+This is the post-authentication landing screen, whether the user registered independently or accepted an invitation. Separate **Your Spaces** (active memberships) from **Find a Space** (discoverable spaces the user has not joined). Selecting an invitation opens a clear confirmation sheet showing the Space, inviter, proposed role, and access summary; accepting activates the membership after validation, while declining/reviewing later is explicit. If multiple invitations exist, show a notification badge and an invitation list rather than hiding any in a single modal.
+
+For a discoverable Space, the user opens its public profile and submits the minimum Space-specific required information using a Space-managed join form. The user is not marked as a member and cannot access private records merely by submitting the form. **Proposed secure default:** create a pending join request that an authorized Space administrator reviews; access begins only after approval. Automatic admission is a separate per-Space policy requiring explicit authorization and abuse controls. Do not expose private member lists, financial data, or funeral cases in the discovery screen.
+
+Existing memberships can be selected to enter that Space:
+
+```text
+┌──────────────────────────────┐
+│ Your Spaces             [👤] │
+│                              │
+│ Society A          Treasurer│
+│ [Open Society Space       >] │
+│                              │
+│ Society B             Member│
+│ [Open Society Space       >] │
+│                              │
+│ Find a Space to join          │
+│ [Search by name / code]      │
+└──────────────────────────────┘
+```
+
+Do not silently skip this landing screen after sign-in: users may need to review invitations or choose another Space. Show only Spaces already joined in **Your Spaces**; invitations and pending join requests have distinct, explicit statuses. Later Parlour, Family, and Supplier Spaces use the same hub shell while preserving separate permissions and data.
 
 ### 6.3 Home dashboard
 
@@ -360,6 +383,53 @@ Start with reports listed in the Society concept: monthly contribution/arrears a
 
 Society profile, user roles, approved rules/constitution references, notification preferences, help, privacy, and sign-out. Rule configuration should be separate from day-to-day claim processing, versioned, and restricted to authorized administrators. Show a rule’s effective date and approval history. Require an explicit review step before a rule change takes effect.
 
+### 6.12 Account registration, OTP verification, and invitations
+
+Users can create an app account with or without a Space invitation. Registration alone creates no Space membership and grants no private data access.
+
+**Account creation screen**
+
+```text
+┌──────────────────────────────┐
+│ Create your account          │
+│                              │
+│ Full name                    │
+│ [________________________]   │
+│ Email address                │
+│ [________________________]   │
+│ Phone number                 │
+│ [________________________]   │
+│                              │
+│ Verify with                  │
+│ (•) Email code  ( ) SMS code │
+│                              │
+│ [Send verification code]     │
+│ Already registered? Log in   │
+│ Privacy notice • Terms       │
+└──────────────────────────────┘
+```
+
+The account identity fields should be minimized and the exact required profile fields need review. At least one selected contact channel must be verified; support email OTP and SMS phone OTP. Where both channels have been verified, the user may choose the channel for the OTP. Do not claim that an unverified contact method can be used for recovery.
+
+**OTP verification screen**
+
+```text
+┌──────────────────────────────┐
+│ Check your email / messages  │
+│ Code sent to [masked contact]│
+│                              │
+│ [ _ ] [ _ ] [ _ ] [ _ ] [ _ ] [ _ ]
+│                              │
+│ [Verify code]                │
+│ Resend code in 00:30         │
+│ Use another verified method │
+└──────────────────────────────┘
+```
+
+After verification, create the account/session and take the user to the **Spaces screen**. If the registration started from a valid invitation, show its Space, inviter, proposed role, and access summary for explicit acceptance; do not silently accept it. For an existing account, authenticate and link the invitation without creating a duplicate account. Expired, revoked, reused, or mismatched invitations need a safe recovery path.
+
+An invitation notification on the Spaces screen opens a review sheet with **Accept invitation**, **Decline**, and **Later** actions. Accepting links membership to the existing account only after the invitation and target role are validated. Authorized Space administrators send invitations; the user can also create an account first and later join a discoverable Space through a join request.
+
 ## 7. Interaction patterns: sheets, dialogs, and gestures
 
 ### Bottom sheets
@@ -400,6 +470,12 @@ Reserve modal dialogs for consequential confirmation or blocking decisions, not 
 8. Members can see only their own approved contribution/membership information if the society enables member access.
 9. Role checks apply on every server request; unauthorized access is denied and logged appropriately.
 10. The app supports Android and iOS with consistent workflows and platform-specific usability checks.
+11. Authorized administrators can invite, resend, revoke, and review invitations for a specific Space and role; invitees can activate an account or link an existing account.
+12. Users can sign in, sign out, and recover access using the approved identity provider and recovery policy; no real authentication is implied until the provider is integrated.
+13. An account is separate from a society member record. Account creation or invitation acceptance must not create an unapproved society membership or expose another member's data.
+14. The backend uses PostgreSQL schema migrations for the approved Phase 1 entities; migrations are repeatable in development/test and controlled in staging/production.
+15. Application data access is tenant/Space-scoped server-side. Database constraints enforce referential integrity and prevent duplicate invitation acceptance or duplicate contribution posting.
+16. Audit history records relevant account activation, invitation, role, access revocation, and business-record changes without storing credentials or raw invitation secrets.
 
 ### Acceptance checks for key flows
 
@@ -410,6 +486,10 @@ Reserve modal dialogs for consequential confirmation or blocking decisions, not 
 - A committee decision is attributable and correction does not erase the original event.
 - On both platforms, text scaling and screen reader labels keep core actions understandable; no core action depends exclusively on color or gesture.
 - A network error does not falsely show a server-side success. Offline behavior must match the separately approved storage/sync design.
+- A valid single-use invitation activates only the named Space membership and proposed role; expired, revoked, reused, or mismatched invitations are rejected safely.
+- An existing account can accept a new Space invitation without duplicating the account; its permissions remain isolated by Space.
+- A database migration can create/update the approved schema in a clean test database and be verified without production data or secrets.
+- Repeating an import/post request cannot create a duplicate contribution, and a correction preserves the original record in the audit/reversal history.
 
 ## 10. Cross-Space design architecture
 
@@ -441,7 +521,7 @@ When a funeral case connects Spaces, show what information is shared, with whom,
 - Plan POPIA-compliant purposes, access/correction, retention/deletion, data-subject requests, and incident response with qualified legal/privacy guidance.
 - Low-bandwidth usability: lightweight screens, clear loading, resumable work where safe, and no unnecessary large downloads.
 - Offline support is a product question to validate. If supported, define data classification, encryption, device sharing/logout behavior, sync/conflict rules, remote session revocation, and recovery before enabling sensitive edits.
-- Support English initially only if that is explicitly agreed; identify language needs through validation rather than assuming. Structure copy for future localization.
+- **Confirmed:** English is the first-pilot language. Structure copy for future localization and validate other language needs before adding them.
 - Test on representative lower-cost Android devices and current supported iPhones once device support targets are chosen.
 
 ## 12. Out of scope for the first Society Space release (proposed)
@@ -454,19 +534,191 @@ When a funeral case connects Spaces, show what information is shared, with whom,
 - Broad cross-Space sharing without explicit scope, authorization, and review.
 - Highly complex analytics before core data quality is proven.
 
-## 13. Decisions to review before design approval
+## 13. Phase 1 authentication and registration requirements
 
-Please review these in order; each remains **proposed / unresolved**:
+### 13.1 Confirmed Phase 1 registration and Spaces journey
 
-1. Does the proposed Society Space Home → Members → Contributions → Funeral cases → More navigation match your intended first release?
-2. Is the green/ivory/amber palette direction appropriate, or would you prefer a different visual identity?
-3. Which sign-in identifier and verification method should we explore first? Alternatives include email/password, phone-based verification, or a combination with an authenticator/passkey; this needs user, recovery, security, cost, and accessibility validation.
-4. Which society roles and approval boundaries are needed in a real pilot society?
-5. Which contribution and claim steps must be usable with unreliable/no internet, and which should remain online-only?
-6. What exact information may members see about their own contributions and covered lives?
-7. Which local languages, terminology, and funeral-case variations must be included in the first pilot?
-8. Should we next produce a clickable low-fidelity prototype (visual navigation and sample screens without real data) or refine these written requirements first?
+The user confirmed that registration is allowed with or without an invitation. A person may have a Funeral Spaces account without being a member of any Space. Registration creates the account only; it does not silently create society membership or grant access to private records. Sign-up collects name, surname, location, selected Space, Space-specific questions, email, cell phone, address, preferred name, password, and password confirmation.
 
-## 14. Review and change control
+1. New user chooses **Sign up**, completes and submits the registration form, and the service creates the account in a pending-verification state only after successful registration. Then the user verifies either the email address or cell phone using the OTP sent after account creation. Do not send an OTP as part of ordinary login. Registration alone creates no Space membership or private-data access.
+2. If registration began from an invitation, the user reviews the Space, inviter, proposed role, and permissions, then accepts or declines. Accepting a valid invitation activates only that Space membership and role.
+3. If registration began without an invitation, the account is created with no Space membership and the user is taken to the Spaces screen.
+4. The Spaces screen shows active memberships, pending invitations, pending join requests, and discoverable Spaces as clearly separate sections/states.
+5. User may search for a discoverable Space, inspect its public profile, provide that Space’s required join information, and submit a join request.
+6. **Proposed security rule:** a no-invitation join request remains pending until reviewed by an authorized Space administrator. The account is not “marked” as a member and receives no private Space access while pending. Automatic admission requires a separately approved policy and abuse controls.
+
+An existing user can receive invitations later. The Spaces screen must show a visible invitation notification and allow the user to review, accept, or decline it. Authorized Space administrators can send invitations; sending an invitation and accepting one are separate auditable actions.
+
+The user confirmed that Phase 1 member accounts are allowed; access is still controlled by Space membership and permissions. Society self-registration/creation is distinct from a user account and remains unavailable unless a controlled society-onboarding flow is separately approved.
+
+### 13.1.1 English and visual decisions confirmed
+
+- Initial release language: English. Keep text structured for future localization.
+- Keep the existing Society Space navigation: Home → Members → Contributions → Funeral cases → More for Phase 1; revisit in enhancement phases.
+- The green palette is acceptable for Phase 1. Defer exploration of alternate palettes to an enhancement phase; existing contrast/accessibility checks still apply.
+
+### 13.2 Sign-in and session flow
+
+1. User enters their registered username/email and password. No OTP is sent during normal login because the contact channel was verified during registration.
+2. The authentication service checks the password securely and applies generic errors, rate limits, and abuse monitoring to prevent account discovery and password guessing.
+3. After successful authentication, the app obtains session credentials according to the selected security design and opens the Spaces landing screen for every account, including accounts with no membership.
+4. The Spaces API response distinguishes active memberships, invitations that need review, pending join requests, and public/discoverable Spaces. It must not include private records for the latter three states.
+5. Every protected API operation checks the authenticated account, active membership, role, permission, and Space scope server-side. Space context cannot carry permissions from one Space to another.
+6. The app stores secrets only in platform-protected secure storage, never ordinary preferences, logs, analytics, or clipboard. Sign-out clears credentials and sensitive cached content per the approved device/offline policy; revoked or expired sessions return the user to a safe sign-in state.
+
+### 13.3 Account and recovery requirements
+
+- Support self-registration with account-only status, post-registration OTP verification over email or SMS, username/email + password sign-in, sign-out, approved password/account recovery, invitation resend/revoke/expiry, join-request submission/review, administrator-driven role change, and deactivation.
+- Verify either the email or cell phone after successful account creation. The verified contact is used according to the approved recovery and notification policy; do not expose whether a contact is registered in user-facing error messages.
+- Apply server-side rate limits and abuse monitoring to sign-in, recovery, and invitation endpoints. Use generic failure responses and avoid account enumeration.
+- Prefer a vetted identity provider or carefully reviewed authentication service. Never store plaintext passwords. Use a recognized password-hashing implementation and professional security review—never custom cryptography.
+- Define session expiry, refresh, revocation after role/account changes, lost/shared phones, and simultaneous-device behavior before release.
+- Consider multi-factor authentication for privileged roles as a risk-based decision; confirm usability, recovery, and support impact before requiring it.
+- Avoid sensitive case, membership, or contribution details in lock-screen notifications and sign-in error text.
+- Record security-relevant events (invitation lifecycle, role changes, recovery, account deactivation, and appropriate sign-in events) without logging passwords, access tokens, or unnecessary personal data.
+- Google/Facebook buttons in the visual mockup remain non-functional until social sign-in is explicitly approved, configured, and tested.
+
+### 13.4 Authentication acceptance checks
+
+- An uninvited person can create an account and see the Spaces landing screen but cannot access a Society Space’s private records by creating an account or guessing an identifier.
+- A user with no membership can view only Space discovery/profile information explicitly made public and submit a join request; the request does not grant membership or private access.
+- After every successful sign-in or registration, the app opens the Spaces landing screen and clearly distinguishes active Spaces, invitations, pending requests, and discoverable Spaces.
+- A valid invitation is single-use, expires, can be revoked, and grants only the reviewed Space and role.
+- An invitee with an existing app account can accept an invitation without producing a duplicate account.
+- A deactivated user or revoked Space membership loses access on subsequent API requests, including old deep links.
+- Sign-in and recovery errors do not reveal whether an account exists; repeated attempts are rate-limited.
+- Session credentials are not stored in ordinary local preferences or written to logs.
+- Changing active Space never exposes records from another Space, and every server request enforces membership and permissions.
+- Recovery, expiry, lost-device, and session-revocation flows are tested on Android and iOS before production release.
+
+## 14. Phase 1 database creation and design
+
+### 14.1 Database approach
+
+**Provisional recommendation:** PostgreSQL on the server, with schema changes managed through versioned migrations. Relational constraints fit the links between societies, accounts, roles, members, covered lives, contributions, and funeral cases. Flutter communicates with the backend API; it must not connect directly to PostgreSQL.
+
+Create separate development, test, staging, and production environments. Production credentials must be managed outside source control. Use encrypted connections, least-privilege database accounts, automated backups, tested restore procedures, monitoring, and a documented retention/deletion policy. Do not use live member or funeral data in development/test environments; use synthetic or properly de-identified data.
+
+The initial database foundation uses first-party email/username + password authentication, pending selection of the production identity service. It separates account, profile, address, contact, login identifier, and password credential data. Password credentials contain only a vetted password hash—not plaintext or reversibly encrypted passwords. If a hosted identity provider is chosen instead, replace or adapt these credentials/login-identifier tables to store the provider's stable subject mapping. Authentication logic, password hashing, OTP delivery, and sessions still require a dedicated security design and review.
+
+### 14.2 Proposed relationship model
+
+```mermaid
+erDiagram
+    APP_USER ||--|| USER_PROFILE : has
+    APP_USER ||--o{ USER_CONTACT : owns
+    APP_USER ||--o{ USER_ADDRESS : has
+    APP_USER ||--|| AUTH_CREDENTIAL : uses
+    APP_USER ||--o{ AUTH_LOGIN_IDENTIFIER : has
+    APP_USER ||--o{ REGISTRATION_SUBMISSION : makes
+    REGISTRATION_SUBMISSION ||--o{ REGISTRATION_ANSWER : contains
+    REGISTRATION_FORM_VERSION ||--o{ REGISTRATION_QUESTION : defines
+    REGISTRATION_FORM_VERSION ||--o{ REGISTRATION_SUBMISSION : used_by
+    REGISTRATION_SUBMISSION ||--o{ VERIFICATION_CHALLENGE : verifies
+    APP_USER ||--o{ AUTH_SESSION : has
+    APP_USER ||--o{ AUTH_EVENT : generates
+    APP_USER ||--o{ SPACE_MEMBERSHIP : receives
+    SPACE ||--o{ SPACE_MEMBERSHIP : grants_access
+    SOCIETY ||--o{ SPACE : owns
+    APP_USER ||--o{ INVITATION : creates
+    SPACE ||--o{ INVITATION : targets
+    APP_USER ||--o{ SPACE_JOIN_REQUEST : submits
+    SPACE ||--o{ SPACE_JOIN_REQUEST : receives
+    APP_USER ||--o{ SPACE_JOIN_REQUEST : reviews
+    SPACE ||--o{ SPACE_MEMBERSHIP : contains
+    ROLE ||--o{ SPACE_MEMBERSHIP : assigned
+    ROLE ||--o{ ROLE_PERMISSION : includes
+    PERMISSION ||--o{ ROLE_PERMISSION : mapped
+    SOCIETY ||--o{ SOCIETY_MEMBER : registers
+    APP_USER o|--o| SOCIETY_MEMBER : may_link_to
+    SOCIETY_MEMBER ||--o{ COVERED_LIFE : covers
+    SOCIETY_MEMBER ||--o{ CONTRIBUTION : pays
+    SOCIETY ||--o{ STATEMENT_IMPORT : imports
+    STATEMENT_IMPORT ||--o{ IMPORTED_TRANSACTION : contains
+    SOCIETY_MEMBER o|--o{ IMPORTED_TRANSACTION : may_match
+    SOCIETY_MEMBER ||--o{ FUNERAL_CASE : subject_of
+    COVERED_LIFE o|--o{ FUNERAL_CASE : subject_of
+    FUNERAL_CASE ||--o{ CASE_CHECKLIST_ITEM : tracks
+    APP_USER ||--o{ AUDIT_EVENT : performs
+    SPACE ||--o{ AUDIT_EVENT : scopes
+```
+
+`APP_USER` is a platform account. `SOCIETY_MEMBER` is a society’s membership record. They are distinct: someone can be recorded as a member without app access; an app user may be an officer without being a society member; one user may eventually belong to multiple Spaces. Do not use an email address as a database primary key or assume it is permanently unique/unchangeable.
+
+### 14.3 Proposed Phase 1 entities
+
+| Table / entity                                            | Purpose and important fields (provisional)                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app_user`                                                | Internal account profile: UUID, display name, verified contact references as needed, status, created/updated timestamps. Avoid unnecessary duplicate personal data.                                                                                                                                        |
+| `user_profile`, `user_address`, `user_contact`            | Normalized personal profile, address/location, and email/phone contact rows. Contact rows carry verification and primary-contact state; globally unique normalized values prevent duplicate email/phone accounts.                                                                                          |
+| `auth_login_identifier`, `auth_credential`                | Normalized unique username lookup plus a separate credential row containing a password hash and login counters/lockout fields. Email login resolves using a verified email contact. No plaintext passwords.                                                                                                |
+| `registration_form_version`, `registration_question`      | Space-type registration form versions and the questions asked for that version. A versioned form preserves the meaning of submitted answers if prompts change later.                                                                                                                                       |
+| `registration_submission`, `registration_answer`          | Pending/verified account-registration attempt, selected Space type, chosen contact to verify, and one row per answer linked to the exact versioned question. This selection is not a Space membership.                                                                                                     |
+| `verification_challenge`                                  | Keyed OTP hash, purpose, delivery state, expiry, attempt counters, consumption/invalidation metadata; no plaintext OTP. Delivery begins after successful pending-account registration is committed.                                                                                                        |
+| `auth_session`, `auth_event`                              | Hashed refresh-token sessions with expiry/revocation and a minimized account-security audit trail.                                                                                                                                                                                                         |
+| `society`                                                 | Society workspace owner/tenant: UUID, display name, status, profile/constitution references, timestamps. Registration fields need validation.                                                                                                                                                              |
+| `space`                                                   | Extensible workspace: UUID, owning society/organization reference, type (initially `society`), name, status. Future Space types must retain separate permissions.                                                                                                                                          |
+| `role`, `permission`, `role_permission`                   | Role templates and permissions scoped to a Space type; society-specific overrides only if validated as necessary. Enforce in API policy, not only UI.                                                                                                                                                      |
+| `space_membership`                                        | User-to-Space authorization: user UUID, Space UUID, role UUID, status, invited/activated/revoked timestamps and actor references.                                                                                                                                                                          |
+| `invitation`                                              | Space, target contact, proposed role, token hash (never raw token), expiry, created/revoked/accepted timestamps, inviting actor, state. Tokens are random, single-use, expiring, and revocable.                                                                                                            |
+| `space_join_request`                                      | User UUID, Space UUID, request state (`pending`, `approved`, `declined`, `withdrawn`), submission/review timestamps and actors, minimized review note, and a versioned snapshot/reference to the Space-defined required fields. Approval creates membership in a transaction; submission alone never does. |
+| `space_join_request_value` (or structured profile fields) | Values submitted for the Space's required join form. Define allowed field types, purpose, retention, visibility, and optional/sensitive classification before collecting personal information; never expose submitted values to unrelated Spaces or applicants.                                            |
+| `society_member`                                          | Society membership identity: UUID, society UUID, member number, necessary profile fields, status, join/leave dates. Member number unique per society; fields subject to privacy/workflow validation. Optional link to `app_user`.                                                                          |
+| `covered_life`                                            | Covered person attached to a society member: relationship, effective dates, status, minimum identity fields the society needs. Listing does not guarantee benefit approval.                                                                                                                                |
+| `contribution`                                            | Ledger entry: society/member references, amount as fixed-precision decimal, currency (ZAR where confirmed), payment date, source/status, receipt/reference, creator, and correction/reversal linkage. Never use floating point for money.                                                                  |
+| `statement_import`, `imported_transaction`                | Import batch and parsed rows: source reference, period, checksum/idempotency key, import status, row amount/date/reference, suggested member, match reason/status, reviewer and confirmation state. Preserve original rows and review decisions.                                                           |
+| `funeral_case`, `case_checklist_item`                     | Society-scoped notification/case and checklist/status timeline. Link to a society member or covered life; record assigned officer, rule version, and authorized review outcomes.                                                                                                                           |
+| `society_rule_version`                                    | Versioned society-approved rules/checklist configuration with effective date, approver, approval timestamp, audit reference. Rule format and authority need validation.                                                                                                                                    |
+| `audit_event`                                             | Append-only material action record: Space, actor, event type, target type/id, UTC timestamp, correlation ID, minimized change summary/reason. Never include secrets or unnecessary document contents.                                                                                                      |
+
+Phase 1 may narrow this list after discovery. Preserve account/Space boundaries and auditability. Cross-Space sharing grants, parlour catalogue/quotes, family invitations, supplier orders, and marketplace tables belong to later phases unless validated pilot needs require them.
+
+### 14.4 Data integrity and privacy rules
+
+- Use UUID primary keys, foreign keys, check/unique constraints for invariants, and indexes for common queries (Space membership, member search, contribution period/status, case status/date, invitation lookup).
+- Store timestamps in UTC and render locally; define date-only versus timestamp semantics for contribution dates, effective dates, and event timelines.
+- Store money as fixed-precision numeric values with explicit currency; define rounding and reconciliation rules. Do not use floating-point types for financial amounts.
+- Enforce tenant/Space scoping in every API query and write. Database row-level security may be evaluated after the connection/pooling model is understood and tested; it does not replace API authorization.
+- Use soft deactivation where operational/audit requirements require history; define lawful retention and deletion/anonymization with privacy/legal guidance. Avoid indiscriminate deletion or indefinite retention.
+- Do not place passwords, raw invitation tokens, access tokens, bank credentials, unnecessary bank files, or sensitive case details in logs or analytics. Restrict and audit document access separately.
+- Imports and contribution posting must be idempotent: retrying cannot create duplicate ledger entries. Corrections use linked reversal/amendment events rather than erasing financial history.
+- Define encrypted backups, restore testing, disaster recovery objectives, and access controls before storing real society data.
+
+### 14.5 Database implementation and migration workflow
+
+1. Confirm the Phase 1 user/account lifecycle, role boundaries, join-request approval policy, discovery visibility, and exact join-form fields with pilot societies.
+2. Choose and document identity provider/authentication; decide which identity/profile data is mirrored in PostgreSQL.
+3. Create local development database and least-privilege app role; never use production credentials locally.
+4. Implement schema changes as ordered, version-controlled migrations with review and rollback/forward-fix guidance. Avoid manual production-only schema changes.
+5. Apply migrations automatically in development/test and through a controlled release process in staging/production.
+6. Seed synthetic demo data only. Test constraints, permissions, tenant isolation, invitation expiry/revocation, idempotency, audit history, backup restoration, and migration compatibility.
+7. Document engine/version, migration status, backup policy, retention, monitoring, and recovery instructions for deployment.
+
+**Not yet specified:** deployment provider/region, identity provider, member data fields, invitation channel, password/passkey policy, MFA policy, notification provider, session/device policy, retention periods, row-level security usage, and cross-Space consent record. Validate with product, operational, technical, and South African legal/privacy experts where relevant.
+
+## 15. Decisions to review before design approval
+
+### Confirmed by the user (26 October 2026)
+
+1. Phase 1 Society Space navigation remains Home → Members → Contributions → Funeral cases → More through enhancement phases.
+2. Retain the green palette for Phase 1; reconsider palettes during a later enhancement phase.
+3. People may register with or without an invitation. A new account is not automatically assigned to a Space. Users can discover a Space and submit its required join information; invitations may also be sent and received/accepted.
+4. After login/registration, all users land on the Spaces screen. Show a visible invitation notification when an invitation is pending and let the user review/confirm it.
+5. Support both SMS phone OTP and email OTP.
+6. English is the first-pilot language.
+7. The user wants to work on registration/login and build the supporting APIs and databases.
+
+### Still unresolved; do not silently decide
+
+1. Which roles can send invitations, review/approve join requests, and assign roles; whether joins are always reviewed or can be automatically admitted; and how a first society administrator is verified.
+2. Exact required join-form fields, Space discovery/search criteria, what information is public, and whether a user can submit multiple requests.
+3. Whether users choose either verified OTP channel or a Space sets the channel; primary account identifier; provider for identity, OTP, email, and SMS; OTP lifetime/attempt settings; account recovery; and whether passwords/passkeys or privileged-user MFA are supported.
+4. Session expiry, refresh/revocation, shared-device behavior, and device-loss recovery.
+5. Offline behavior and the precise contribution/covered-life visibility available to members.
+6. Society member data fields, privacy/retention policy, deployment provider/region, and exact production security controls.
+
+Use pending review and no Space access as the conservative development behavior for a join request until an authorized approval policy is agreed. Keep OTP delivery behind a provider interface until the user selects an identity/OTP provider; do not ship mock codes as real authentication.
+
+## 16. Review and change control
 
 Record approved decisions with date, owner, and rationale. Keep unresolved items visibly unresolved. Update the implementation plan and learning journal when a major design decision is approved. Do not treat this proposal as a legal, regulatory, security, or society-governance approval.

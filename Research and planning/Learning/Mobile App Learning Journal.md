@@ -99,3 +99,82 @@ The first implementation will reproduce the visible login UI in Flutter for Andr
 - The PDF uses the EverBond brand, while the platform concept is Funeral Spaces. Confirm whether EverBond is the product brand, a society label, or placeholder branding.
 - Select authentication and password recovery approaches before connecting the login form. Google/Facebook buttons are currently visual placeholders and do not sign in.
 - The screen has been tested with Flutter analyzer and widget tests; review on actual Android/iOS device sizes and against the PDF before calling visual matching complete.
+
+## 26 October 2026 — Registration and Spaces landing decisions
+
+### Decisions confirmed by the user
+
+- People may register with or without a Space invitation. Creating an account does **not** automatically make someone a member of a society or reveal private Space information.
+- SMS phone OTP and email OTP are the supported account-verification options.
+- Every successfully signed-in or registered user lands on the Spaces screen. That screen separates active memberships, invitations, pending join requests, and discoverable Spaces.
+- A pending invitation is visibly called out and must be reviewed before the user accepts or declines it.
+- A person without an invitation can inspect a discoverable Space and provide its required information to request access.
+- Phase 1 keeps Home → Members → Contributions → Funeral cases → More navigation and the green palette. Revisit navigation/palette in enhancement phases.
+- English is the first-pilot language.
+
+### Concepts learned
+
+- **Account versus membership:** an account proves who is signing in; a separate Space membership grants access. An account can exist without any membership.
+- **Join request versus invitation:** a join request is started by the person seeking access; an invitation is initiated by an authorized Space representative. Both require distinct status and audit history.
+- **Pending approval as a safe default:** until role and approval rules are defined, submitting a join request should not grant access. An authorized approval can create membership; automatic admission is a separate policy choice.
+- **Spaces landing screen:** this is the first authenticated destination, not a direct jump into one society. It helps a person handle invitations, view joined Spaces, and request a new Space.
+- **Provider boundary:** the app can design for email/SMS codes now, but actual delivery and verification depend on a selected identity/OTP provider. A demo code must never be presented as real authentication.
+
+### Planning document update and next build boundary
+
+Updated the Society Space requirements to replace the previous invite-only recommendation with the confirmed self-registration + optional invitation + Space join-request flow. Added a pending join-request entity to the proposed database design. This is documentation, not a live API/database implementation.
+
+Before real account verification can be connected, choose the identity/OTP provider, OTP-channel selection rules, account recovery/session policy, and privileged-role verification. Join-form fields and approval permissions also need pilot decisions. A safe development implementation can still build the registration and Spaces UI plus provider-neutral API contracts/schema, with membership denied until approval and delivery adapter explicitly unconfigured.
+
+## 26 October 2026 — Phase 1 registration and database planning
+
+### Requirements update
+
+Expanded `Research and planning/Funeral Spaces - Society Space Product Requirements and Design.md` with proposed invitation-based registration, sign-in/session/recovery requirements, authentication acceptance checks, a PostgreSQL relationship diagram, Phase 1 entity descriptions, data integrity/privacy rules, and a migration workflow. These are planning requirements, not an implemented authentication service or database.
+
+### Concepts learned
+
+- **Authentication vs. authorization:** authentication establishes which account is signed in; authorization checks which Space and actions that account may access.
+- **Account vs. society member:** an app login is not the same as a society’s membership record. Some members may not have accounts, and some officers may not be members.
+- **Invitation-based onboarding:** an authorized person invites an account into a specific Space with a specific role; this is proposed for the pilot to avoid public access to private society records.
+- **Relational database:** PostgreSQL tables use primary/foreign keys and constraints to keep linked records consistent.
+- **Schema migration:** a version-controlled, repeatable change to database structure, applied across environments rather than editing production manually.
+- **Tenant/Space isolation:** each backend read/write must verify the active Space and user permissions; UI hiding alone is not security.
+- **Idempotency and audit:** retrying a financial request must not duplicate it; corrections preserve prior actions through reversal/amendment history.
+
+### Open decisions
+
+- Self-registration and password-based login are now confirmed; the remaining question is which account/contact verification and password-auth provider to use.
+- **User confirmed 26 October 2026:** verification options should include SMS one-time code to a phone number or email one-time code. Whether users choose the channel or the society configures it remains open.
+- Password recovery/fallback, MFA for privileged roles, session/device policy, notification channel, and final Space-specific registration questions remain unresolved.
+- PostgreSQL remains the provisional server database direction. A first local schema migration now exists; deployment, backup/restore, data retention, and production migration tooling still need confirmation.
+
+## 26 October 2026 — Password login and registration verification flow
+
+### Decisions confirmed by the user
+
+- Restore the original username/email + password login. The login screen has a **Sign up** link; existing users do not receive an OTP during ordinary sign-in because their contact channel was verified at registration.
+- The registration form asks for name, surname, location, selected Space, Space-specific questions, email, cell phone, address, preferred name, password, and password confirmation.
+- After successful account registration, send an OTP to either the email address or cell phone to verify that chosen contact. Do not send that code before account registration succeeds.
+
+### Implementation and learning notes
+
+- The login form and registration form are separate screens connected by a navigation link. Conditional form fields change when a user selects a Space type; current Space-specific questions are examples and require product confirmation.
+- The OTP screen is only a UI preview. Form validation does not create an account, and no code is sent or verified because there is no identity backend/provider yet.
+- Password login requires secure backend authentication, password hashing by a vetted service, account recovery, rate limiting, and protected session storage before it can be production-ready.
+
+## 27 October 2026 — Normalized account and registration database
+
+### Implemented database foundation
+
+- Added `database/migrations/001_auth_registration.sql` for PostgreSQL. Account status, profile, address, email/phone contact, username, password credential, Space-specific form version/questions, registration submission/answers, verification challenge, sessions, and authentication events are separate tables.
+- Login identifiers are separate from password credentials. The credential table stores only an encoded password hash and security counters; email sign-in resolves using the verified email contact. No plaintext password, OTP, or refresh token is stored.
+- A registration selects an exact version of a Space-type form, and each answer points to a question from that form version. This is normalization: repeated form/question data is stored once and linked by keys, while answer records do not copy the question wording.
+- OTP challenge metadata models a queued/sent/failed delivery and can only be used for registration-contact verification or password reset. The API must commit a pending registration before asking a delivery provider to send a code. The schema itself does not send or validate a code.
+- Applied the migration to a fresh local PostgreSQL 14 development database and ran a synthetic registration insert through related tables in a transaction that was rolled back. The migration and relation inserts succeeded.
+
+### Still not implemented
+
+- No HTTP API, password hashing/verification implementation, rate limiting, email/SMS delivery provider, OTP verification service, or token issuance exists yet.
+- The database does not grant Space membership from registration. Space directory, membership, invitations, join requests, and Society Space business tables remain future migrations.
+- SQL constraints help maintain data integrity but do not replace server-side authorization or security controls. Use synthetic data locally and have password/OTP/session handling reviewed before production.
