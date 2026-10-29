@@ -2,6 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/access_flow.dart';
 import 'package:mobile/main.dart';
+import 'package:mobile/registration_api.dart';
+
+class _FakeRegistrationApi extends RegistrationApi {
+  const _FakeRegistrationApi();
+
+  static bool verifyCalled = false;
+
+  @override
+  Future<Map<String, dynamic>> register(Map<String, Object?> payload) async => {
+    'registrationId': '00000000-0000-4000-8000-000000000001',
+    'status': 'pending_verification',
+    'channel': payload['verificationChannel'],
+    'destination': 'a•••@example.org',
+    'otpForDevelopment': '123456',
+  };
+
+  @override
+  Future<Map<String, dynamic>> verify({
+    required String registrationId,
+    required String code,
+  }) async {
+    verifyCalled = true;
+    return {'status': 'active', 'message': 'Contact verified.'};
+  }
+}
 
 void main() {
   void useTallTestViewport(WidgetTester tester) {
@@ -72,6 +97,7 @@ void main() {
       'registration-phone',
       'registration-address',
       'registration-preferred-name',
+      'registration-username',
       'registration-password',
       'registration-confirm-password',
     ]) {
@@ -103,7 +129,9 @@ void main() {
     'registration validates required fields before opening OTP screen',
     (tester) async {
       useTallTestViewport(tester);
-      await tester.pumpWidget(const MaterialApp(home: RegistrationScreen()));
+      await tester.pumpWidget(
+        const MaterialApp(home: RegistrationScreen(api: _FakeRegistrationApi())),
+      );
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('registration-continue')),
@@ -121,10 +149,13 @@ void main() {
   );
 
   testWidgets(
-    'valid registration details advance to the selected OTP preview',
+    'valid registration details call the API and open code verification',
     (tester) async {
+      _FakeRegistrationApi.verifyCalled = false;
       useTallTestViewport(tester);
-      await tester.pumpWidget(const MaterialApp(home: RegistrationScreen()));
+      await tester.pumpWidget(
+        const MaterialApp(home: RegistrationScreen(api: _FakeRegistrationApi())),
+      );
 
       Future<void> fill(String key, String value) async {
         final field = find.byKey(Key(key));
@@ -154,6 +185,7 @@ void main() {
       await fill('registration-phone', '0821234567');
       await fill('registration-address', '10 Example Road');
       await fill('registration-preferred-name', 'Ama');
+      await fill('registration-username', 'amahle.dlamini');
       await fill('registration-password', 'safe-password-123');
       await fill('registration-confirm-password', 'safe-password-123');
 
@@ -168,9 +200,17 @@ void main() {
       expect(find.text('Confirm your email'), findsOneWidget);
       expect(find.byKey(const Key('registration-otp')), findsOneWidget);
       expect(
-        find.textContaining('does not create an account or send a code'),
+        find.text('Development code: 123456'),
         findsOneWidget,
       );
+
+      await tester.enterText(find.byKey(const Key('registration-otp')), '123456');
+      await tester.pump();
+      expect(tester.widget<FilledButton>(find.byKey(const Key('registration-verify'))).onPressed, isNotNull);
+      await tester.tap(find.byKey(const Key('registration-verify')));
+      await tester.pumpAndSettle();
+
+      expect(_FakeRegistrationApi.verifyCalled, isTrue);
     },
   );
 }

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'main.dart' show AppColors;
+import 'registration_api.dart';
 
 class RegistrationScreen extends StatefulWidget {
-  const RegistrationScreen({super.key});
+  const RegistrationScreen({super.key, this.api = const RegistrationApi()});
+
+  final RegistrationApi api;
 
   @override
   State<RegistrationScreen> createState() => _RegistrationScreenState();
@@ -16,6 +19,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _location = TextEditingController();
   final _address = TextEditingController();
   final _preferredName = TextEditingController();
+  final _username = TextEditingController();
   final _email = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
@@ -27,6 +31,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   String _verificationChannel = 'email';
   bool _obscurePassword = true;
   bool _obscureConfirmation = true;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -35,6 +40,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _location.dispose();
     _address.dispose();
     _preferredName.dispose();
+    _username.dispose();
     _email.dispose();
     _phone.dispose();
     _password.dispose();
@@ -61,21 +67,70 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _ => [],
   };
 
-  void _continueToVerification() {
+  String? get _spaceCode => switch (_space) {
+    'Society Space' => 'society',
+    'Parlour Space' => 'parlour',
+    'Family Space' => 'family',
+    'Supplier Space' => 'supplier',
+    _ => null,
+  };
+
+  List<String> get _spaceQuestionKeys => switch (_spaceCode) {
+    'society' => ['society_reference', 'society_role'],
+    'parlour' => ['parlour_name', 'parlour_services'],
+    'family' => ['family_reference', 'family_relationship'],
+    'supplier' => ['supplier_business_name', 'supplier_services'],
+    _ => [],
+  };
+
+  Future<void> _continueToVerification() async {
     FocusManager.instance.primaryFocus?.unfocus();
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final destination = _verificationChannel == 'email'
         ? _email.text.trim()
         : _phone.text.trim();
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RegistrationOtpScreen(
-          destination: destination,
-          channel: _verificationChannel,
+    setState(() => _isSubmitting = true);
+    try {
+      final result = await widget.api.register({
+        'username': _username.text.trim(),
+        'givenName': _name.text.trim(),
+        'surname': _surname.text.trim(),
+        'preferredName': _preferredName.text.trim(),
+        'location': _location.text.trim(),
+        'address': _address.text.trim(),
+        'email': _email.text.trim(),
+        'phone': _phone.text.trim(),
+        'password': _password.text,
+        'spaceCode': _spaceCode!,
+        'verificationChannel': _verificationChannel,
+        'answers': {
+          for (var index = 0; index < _spaceQuestionKeys.length; index++)
+            _spaceQuestionKeys[index]: index == 0
+                ? _spaceQuestionOne.text.trim()
+                : _spaceQuestionTwo.text.trim(),
+        },
+      });
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RegistrationOtpScreen(
+            api: widget.api,
+            registrationId: result['registrationId'] as String,
+            destination: destination,
+            channel: _verificationChannel,
+            developmentOtp: result['otpForDevelopment'] as String?,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   @override
@@ -170,6 +225,20 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       _required(value, 'Answer: ${_spaceQuestions[index]}'),
                 ),
               ],
+              const SizedBox(height: 14),
+              _textField(
+                key: const Key('registration-username'),
+                controller: _username,
+                label: 'Username',
+                validator: (value) {
+                  final username = value?.trim() ?? '';
+                  if (username.length < 3) return 'Use at least 3 characters';
+                  if (!RegExp(r'^[a-zA-Z0-9._-]+$').hasMatch(username)) {
+                    return 'Use letters, numbers, dots, underscores, or hyphens';
+                  }
+                  return null;
+                },
+              ),
               const SizedBox(height: 14),
               _textField(
                 key: const Key('registration-email'),
@@ -282,8 +351,14 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                 height: 54,
                 child: FilledButton(
                   key: const Key('registration-continue'),
-                  onPressed: _continueToVerification,
-                  child: const Text('Create account'),
+                  onPressed: _isSubmitting ? null : _continueToVerification,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Create account'),
                 ),
               ),
               const SizedBox(height: 14),
@@ -296,19 +371,65 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   }
 }
 
-class RegistrationOtpScreen extends StatelessWidget {
+class RegistrationOtpScreen extends StatefulWidget {
   const RegistrationOtpScreen({
+    required this.api,
+    required this.registrationId,
     required this.destination,
     required this.channel,
+    this.developmentOtp,
     super.key,
   });
 
+  final RegistrationApi api;
+  final String registrationId;
   final String destination;
   final String channel;
+  final String? developmentOtp;
+
+  @override
+  State<RegistrationOtpScreen> createState() => _RegistrationOtpScreenState();
+}
+
+class _RegistrationOtpScreenState extends State<RegistrationOtpScreen> {
+  final _code = TextEditingController();
+  bool _isVerifying = false;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _verify() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isVerifying = true);
+    try {
+      await widget.api.verify(
+        registrationId: widget.registrationId,
+        code: _code.text.trim(),
+      );
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Account verified. You can now log in.')),
+        );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _isVerifying = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final method = channel == 'email' ? 'email' : 'cell phone';
+    final method = widget.channel == 'email' ? 'email' : 'cell phone';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Verify your account'),
@@ -332,23 +453,50 @@ class RegistrationOtpScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'After registration succeeds, a one-time code will be sent to ${_maskDestination(destination, channel)}.',
+              'A one-time code was sent to ${_maskDestination(widget.destination, widget.channel)}.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppColors.muted, height: 1.45),
             ),
             const SizedBox(height: 24),
             TextFormField(
               key: const Key('registration-otp'),
+              controller: _code,
               keyboardType: TextInputType.number,
               textAlign: TextAlign.center,
               maxLength: 6,
+              onChanged: (_) => setState(() {}),
               decoration: _decoration('6-digit verification code'),
+            ),
+            if (widget.developmentOtp != null) ...[
+              const SizedBox(height: 8),
+              SelectableText(
+                'Development code: ${widget.developmentOtp}',
+                key: const Key('development-otp-code'),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 54,
+              child: FilledButton(
+                key: const Key('registration-verify'),
+                onPressed: _isVerifying || _code.text.length != 6
+                    ? null
+                    : _verify,
+                child: _isVerifying
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Verify account'),
+              ),
             ),
             const SizedBox(height: 12),
             const _RegistrationPreviewNotice(),
             const SizedBox(height: 22),
             const Text(
-              'Account creation and OTP delivery are not connected to a server yet. This preview does not create an account or send a code.',
+              'Local development uses a test code only. No real email or SMS is sent.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppColors.muted,
@@ -432,7 +580,7 @@ class _RegistrationPreviewNotice extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
     ),
     child: const Text(
-      'Preview only: the registration form is not connected to account creation or OTP delivery yet.',
+      'Development only: registration uses your local API and a test code. No real email or SMS is sent.',
       style: TextStyle(color: AppColors.ink, height: 1.4, fontSize: 13),
     ),
   );

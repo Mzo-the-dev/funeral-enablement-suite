@@ -178,3 +178,28 @@ Expanded `Research and planning/Funeral Spaces - Society Space Product Requireme
 - No HTTP API, password hashing/verification implementation, rate limiting, email/SMS delivery provider, OTP verification service, or token issuance exists yet.
 - The database does not grant Space membership from registration. Space directory, membership, invitations, join requests, and Society Space business tables remain future migrations.
 - SQL constraints help maintain data integrity but do not replace server-side authorization or security controls. Use synthetic data locally and have password/OTP/session handling reviewed before production.
+
+## 29 October 2026 — First local registration API slice
+
+### Implemented
+
+- Added a NestJS/TypeScript development API in `backend/` and a PostgreSQL connection pool. The backend—not Flutter—owns the database connection.
+- Added health, account-registration, and contact-verification endpoints. Registration validates the selected database form version and writes the pending user, profile, South African address, email/phone contacts, username, Argon2id password hash, form answers, OTP challenge hash, and audit event in one transaction.
+- Added single-use, ten-minute verification codes with a five-attempt limit and a timing-safe keyed-hash comparison. Account/contact activation happens only after successful verification.
+- Added a local-only OTP test sink that returns a visibly labeled development code; this does not send an email or SMS. It is disabled in production and registration is rejected unless a real delivery service or the explicit local test sink is configured.
+- Connected the Flutter registration and code-entry screens to the API client, added the username required by the existing database schema, and added a test fake so widget tests do not need a running server.
+- Documented local setup and mobile-emulator API addresses in `backend/README.md`.
+
+### Concepts learned and important boundaries
+
+- **API:** a controlled HTTP interface that accepts app requests, validates them, applies business rules, and talks to the database. Database credentials stay on the server.
+- **Transaction:** all registration records commit together, or none of them do, preventing partial accounts when a write fails.
+- **Password hash:** Argon2id turns a password into a one-way verification value; the original password is never written to PostgreSQL.
+- **OTP test sink:** a local development substitute for delivery that makes end-to-end testing possible without pretending that real email/SMS was sent. Never expose this in a public or production environment.
+- This milestone does **not** implement password login/session issuing, real email/SMS delivery, distributed rate limiting, production secrets/deployment, account recovery, or Spaces memberships. It is suitable for local development/testing only and needs security/operational review before real users.
+
+### Verification
+
+- Backend TypeScript build and typecheck pass; runtime dependency audit reports no vulnerabilities (development-tool advisories remain to review).
+- Flutter analyzer and widget tests pass, including registration and the API-backed verification screen using a fake server.
+- Local HTTP/database smoke test succeeded with synthetic data: health returned connected, registration persisted, and verification changed the account to active and contact to verified. The backend was stopped after this check.
