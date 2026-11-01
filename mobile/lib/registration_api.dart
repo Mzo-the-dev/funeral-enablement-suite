@@ -33,6 +33,61 @@ class RegistrationApi {
     });
   }
 
+  Future<Map<String, dynamic>> login({
+    required String identity,
+    required String password,
+  }) {
+    return _post('/sessions', {'identity': identity, 'password': password});
+  }
+
+  Future<void> logout(String sessionToken) async {
+    await _post('/sessions/logout', {'sessionToken': sessionToken});
+  }
+
+  Future<List<Map<String, dynamic>>> listSpaceTypes() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/spaces/types'))
+          .timeout(const Duration(seconds: 15));
+      final decoded = jsonDecode(response.body);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final message = decoded is Map<String, dynamic>
+            ? decoded['message']
+            : null;
+        throw RegistrationApiException(
+          message is List
+              ? message.join('\n')
+              : message?.toString() ??
+                    'Request failed (${response.statusCode}).',
+        );
+      }
+      if (decoded is! List ||
+          decoded.any((item) => item is! Map<String, dynamic>)) {
+        throw const RegistrationApiException(
+          'The server returned an unexpected response.',
+        );
+      }
+      return decoded.cast<Map<String, dynamic>>();
+    } on RegistrationApiException {
+      rethrow;
+    } on http.ClientException {
+      throw const RegistrationApiException(
+        'Cannot reach the Spaces server. Check that the local API is running.',
+      );
+    } on FormatException {
+      throw const RegistrationApiException(
+        'The server returned an unreadable response.',
+      );
+    } on Exception catch (error) {
+      if (error.toString().contains('TimeoutException')) {
+        throw const RegistrationApiException(
+          'The Spaces server took too long to respond.',
+        );
+      }
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>> _post(
     String path,
     Map<String, Object?> payload,
@@ -51,11 +106,16 @@ class RegistrationApi {
             ? decoded['message']
             : null;
         throw RegistrationApiException(
-          message is List ? message.join('\n') : message?.toString() ?? 'Request failed (${response.statusCode}).',
+          message is List
+              ? message.join('\n')
+              : message?.toString() ??
+                    'Request failed (${response.statusCode}).',
         );
       }
       if (decoded is! Map<String, dynamic>) {
-        throw const RegistrationApiException('The server returned an unexpected response.');
+        throw const RegistrationApiException(
+          'The server returned an unexpected response.',
+        );
       }
       return decoded;
     } on RegistrationApiException {
@@ -65,10 +125,14 @@ class RegistrationApi {
         'Cannot reach the registration server. Check that the local API is running.',
       );
     } on FormatException {
-      throw const RegistrationApiException('The server returned an unreadable response.');
+      throw const RegistrationApiException(
+        'The server returned an unreadable response.',
+      );
     } on Exception catch (error) {
       if (error.toString().contains('TimeoutException')) {
-        throw const RegistrationApiException('The registration server took too long to respond.');
+        throw const RegistrationApiException(
+          'The registration server took too long to respond.',
+        );
       }
       rethrow;
     }
