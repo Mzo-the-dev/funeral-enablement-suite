@@ -2,6 +2,9 @@
 node_modules/
 .env
 dist/
+backend/.env
+backend/node_modules/
+backend/dist/
 build/
 *.log
 *.swp

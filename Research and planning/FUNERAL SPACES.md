@@ -59,6 +59,9 @@ The platform at a glance
    Parlour discovery, comparable quotations, selected services and booking details.
    Payment links, invoice status and receipts.
    A record of important decisions, dates and arrangements.
+   In the family space, the user can also share fundamental information about policies and cover plans to
+   their chosen family members. This is so that when something happens to a member, all relevant information
+   will be stored and the remaining members will know where to claim from. This is the family funeral library
    3.4 Supplier Space
    Supplier profile and services offered, including service area and availability.
    Catalogue for relevant items such as flowers, catering, tents, chairs, transport, venues and tombstones.
