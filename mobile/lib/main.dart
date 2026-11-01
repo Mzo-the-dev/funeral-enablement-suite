@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'access_flow.dart';
+import 'registration_api.dart';
 
 void main() {
   runApp(const FuneralSpacesApp());
@@ -16,7 +17,9 @@ abstract final class AppColors {
 }
 
 class FuneralSpacesApp extends StatelessWidget {
-  const FuneralSpacesApp({super.key});
+  const FuneralSpacesApp({super.key, this.api = const RegistrationApi()});
+
+  final RegistrationApi api;
 
   @override
   Widget build(BuildContext context) {
@@ -37,13 +40,15 @@ class FuneralSpacesApp extends StatelessWidget {
           selectionHandleColor: AppColors.forest,
         ),
       ),
-      home: const LoginScreen(),
+      home: LoginScreen(api: api),
     );
   }
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.api = const RegistrationApi()});
+
+  final RegistrationApi api;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -54,6 +59,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _identityController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -73,10 +79,42 @@ class _LoginScreenState extends State<LoginScreen> {
       );
   }
 
-  void _submitLogin() {
+  Future<void> _submitLogin() async {
     FocusManager.instance.primaryFocus?.unfocus();
-    if (_formKey.currentState?.validate() ?? false) {
-      _showNotConnectedMessage('Sign-in');
+    if (_isSubmitting || !(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      final result = await widget.api.login(
+        identity: _identityController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      final sessionToken = result['sessionToken'];
+      if (sessionToken is! String || sessionToken.isEmpty) {
+        throw const RegistrationApiException(
+          'The server returned an invalid session.',
+        );
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              SpacesLandingScreen(api: widget.api, sessionToken: sessionToken),
+        ),
+      );
+    } on RegistrationApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(error.message),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -213,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             height: 56,
                             child: FilledButton(
                               key: const Key('login-button'),
-                              onPressed: _submitLogin,
+                              onPressed: _isSubmitting ? null : _submitLogin,
                               style: FilledButton.styleFrom(
                                 backgroundColor: AppColors.forest,
                                 foregroundColor: AppColors.white,
@@ -225,7 +263,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                   fontSize: 16,
                                 ),
                               ),
-                              child: const Text('Log in'),
+                              child: _isSubmitting
+                                  ? const SizedBox.square(
+                                      dimension: 21,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.white,
+                                      ),
+                                    )
+                                  : const Text('Log in'),
                             ),
                           ),
                         ],
@@ -294,6 +340,746 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+}
+
+class SpacesLandingScreen extends StatefulWidget {
+  const SpacesLandingScreen({
+    super.key,
+    required this.api,
+    required this.sessionToken,
+  });
+
+  final RegistrationApi api;
+  final String sessionToken;
+
+  @override
+  State<SpacesLandingScreen> createState() => _SpacesLandingScreenState();
+}
+
+class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
+  List<Map<String, dynamic>> _spaceTypes = [];
+  String? _loadError;
+  bool _isLoading = true;
+  bool _isSigningOut = false;
+  int _selectedTab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSpaceTypes();
+  }
+
+  Future<void> _loadSpaceTypes() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final types = await widget.api.listSpaceTypes();
+      if (mounted) setState(() => _spaceTypes = types);
+    } on RegistrationApiException catch (error) {
+      if (mounted) setState(() => _loadError = error.message);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    if (_isSigningOut) return;
+    setState(() => _isSigningOut = true);
+    try {
+      await widget.api.logout(widget.sessionToken);
+    } on RegistrationApiException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not confirm sign-out with the server.'),
+        ),
+      );
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => LoginScreen(api: widget.api)),
+      (_) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            _SpacesBrandHeader(
+              isSigningOut: _isSigningOut,
+              onSignOut: _signOut,
+            ),
+            _SpacesNavigation(
+              selectedIndex: _selectedTab,
+              onSelected: (index) => setState(() => _selectedTab = index),
+            ),
+            Expanded(
+              child: IndexedStack(
+                index: _selectedTab,
+                children: [
+                  _buildSpacesTab(),
+                  _buildInvitationsTab(),
+                  _buildHelpTab(),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpacesTab() {
+    return ListView(
+      key: const Key('spaces-tab-content'),
+      padding: const EdgeInsets.fromLTRB(20, 15, 20, 20),
+      children: [
+        Text(
+          'Spaces & offerings',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: AppColors.ink,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Care, coordination and support. Find the right space for your role.',
+          style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 17),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Your space',
+              style: TextStyle(
+                color: AppColors.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              '0 accessible',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          key: const Key('empty-memberships'),
+          constraints: const BoxConstraints(minHeight: 65),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.groups_outlined, color: AppColors.muted, size: 18),
+              SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No active Spaces yet',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'An account does not automatically grant Space access.',
+                      style: TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 10,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Explore other offerings',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'These aren’t enabled for your account. Access requires an invitation or approval.',
+          style: TextStyle(color: AppColors.muted, fontSize: 10, height: 1.4),
+        ),
+        const SizedBox(height: 10),
+        if (_isLoading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (_loadError != null)
+          _SpaceTypesError(message: _loadError!, onRetry: _loadSpaceTypes)
+        else if (_spaceTypes.isEmpty)
+          const Text('No Space offerings are currently available.')
+        else ...[
+          ..._spaceTypes.map(_buildSpaceType),
+          _sharedCaseCard(),
+        ],
+        const SizedBox(height: 12),
+        const Divider(color: AppColors.border, height: 1),
+        const SizedBox(height: 9),
+        const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.shield_outlined, color: AppColors.forest, size: 13),
+            SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Separate spaces. Protected information. Access is approved for each Space.',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 9,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInvitationsTab() {
+    return ListView(
+      key: const Key('invitations-tab-content'),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+      children: const [
+        Text(
+          'Invitations',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        SizedBox(height: 5),
+        Text(
+          'Review invitations before joining a Space.',
+          style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+        ),
+        SizedBox(height: 24),
+        Icon(
+          Icons.mark_email_unread_outlined,
+          color: AppColors.forest,
+          size: 30,
+        ),
+        SizedBox(height: 9),
+        Text(
+          'No invitations yet',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Invitations sent to this account will appear here for your review.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHelpTab() {
+    return ListView(
+      key: const Key('help-tab-content'),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+      children: const [
+        Text(
+          'Help',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        SizedBox(height: 5),
+        Text(
+          'Your account and Space access',
+          style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+        ),
+        SizedBox(height: 18),
+        _HelpNote(
+          icon: Icons.lock_outline,
+          title: 'Spaces stay separate',
+          body: 'Joining one Space does not automatically share your information with another.',
+        ),
+        SizedBox(height: 10),
+        _HelpNote(
+          icon: Icons.verified_user_outlined,
+          title: 'Access needs approval',
+          body: 'An invitation or approved request is required before private Space information is available.',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSpaceType(Map<String, dynamic> spaceType) {
+    final code = spaceType['code'] as String? ?? '';
+    final displayName = spaceType['display_name'] as String? ?? code;
+    final offering = _offeringFor(code, displayName);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: _OfferingCard(
+        key: Key('offering-card-$code'),
+        title: displayName,
+        subtitle: 'Access required',
+        description: offering.description,
+        icon: offering.icon,
+        actionLabel: 'Explore & request access',
+        actionKey: Key('space-offer-$code'),
+        onPressed: () => _showAccessInfo(displayName),
+      ),
+    );
+  }
+
+  Widget _sharedCaseCard() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: _OfferingCard(
+        key: const Key('shared-case-card'),
+        title: 'Shared Funeral Case',
+        subtitle: 'Invitation required',
+        description: 'Invited participants coordinate case progress, checklists and updates in a permission-based workspace.',
+        icon: Icons.assignment_outlined,
+        actionLabel: 'How to get invited',
+        actionKey: const Key('shared-case-invitation-help'),
+        onPressed: _showInvitationInfo,
+      ),
+    );
+  }
+
+  void _showAccessInfo(String offeringName) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(offeringName),
+        content: const Text(
+          'Access requests are not connected yet. Choosing an offering does not create membership or grant access to private information.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showInvitationInfo() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Shared Funeral Case'),
+        content: const Text(
+          'A case coordinator must invite you before you can view or update a shared case.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpacesBrandHeader extends StatelessWidget {
+  const _SpacesBrandHeader({
+    required this.isSigningOut,
+    required this.onSignOut,
+  });
+
+  final bool isSigningOut;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 56,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Row(
+        children: [
+          const SizedBox(width: 34, height: 28, child: _EverBondMark()),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'EverBond',
+                  style: TextStyle(
+                    color: AppColors.forest,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  'Together, with care',
+                  style: TextStyle(color: AppColors.muted, fontSize: 9),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            key: const Key('sign-out-button'),
+            tooltip: 'Account options',
+            onSelected: (value) {
+              if (value == 'sign-out') onSignOut();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
+            ],
+            child: SizedBox.square(
+              dimension: 34,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Center(
+                  child: isSigningOut
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(
+                          Icons.person_outline,
+                          size: 17,
+                          color: AppColors.forest,
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SpacesNavigation extends StatelessWidget {
+  const _SpacesNavigation({
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 35,
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: AppColors.border)),
+    ),
+    child: Row(
+      children: [
+        _SpacesNavigationTab(
+          label: 'Spaces',
+          index: 0,
+          selectedIndex: selectedIndex,
+          onSelected: onSelected,
+        ),
+        _SpacesNavigationTab(
+          label: 'Invitations',
+          index: 1,
+          selectedIndex: selectedIndex,
+          onSelected: onSelected,
+        ),
+        _SpacesNavigationTab(
+          label: 'Help',
+          index: 2,
+          selectedIndex: selectedIndex,
+          onSelected: onSelected,
+        ),
+      ],
+    ),
+  );
+}
+
+class _SpacesNavigationTab extends StatelessWidget {
+  const _SpacesNavigationTab({
+    required this.label,
+    required this.index,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final String label;
+  final int index;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = index == selectedIndex;
+    return InkWell(
+      key: Key('navigation-${label.toLowerCase()}'),
+      onTap: () => onSelected(index),
+      child: SizedBox(
+        width: label == 'Invitations' ? 82 : 66,
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: isSelected ? AppColors.forest : AppColors.muted,
+                    fontSize: 10,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              height: 2,
+              color: isSelected ? AppColors.forest : Colors.transparent,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OfferingCard extends StatelessWidget {
+  const _OfferingCard({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.description,
+    required this.icon,
+    required this.actionLabel,
+    required this.actionKey,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final String description;
+  final IconData icon;
+  final String actionLabel;
+  final Key actionKey;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 112),
+    padding: const EdgeInsets.fromLTRB(9, 9, 9, 0),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(7),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 25,
+              height: 25,
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Icon(icon, size: 15, color: AppColors.forest),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 9,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          description,
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 10,
+            height: 1.35,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Divider(height: 1, color: AppColors.border),
+        SizedBox(
+          height: 30,
+          child: TextButton(
+            key: actionKey,
+            onPressed: onPressed,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.forest,
+              padding: EdgeInsets.zero,
+              alignment: Alignment.centerLeft,
+              textStyle: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(child: Text(actionLabel)),
+                const Icon(Icons.arrow_forward, size: 13),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HelpNote extends StatelessWidget {
+  const _HelpNote({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(icon, color: AppColors.forest, size: 19),
+      const SizedBox(width: 9),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              body,
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 11,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+class _SpaceOffering {
+  const _SpaceOffering(this.icon, this.description);
+
+  final IconData icon;
+  final String description;
+}
+
+_SpaceOffering _offeringFor(
+  String code,
+  String fallbackTitle,
+) => switch (code) {
+  'society' => const _SpaceOffering(
+    Icons.groups_outlined,
+    'Manage membership, covered lives, contributions and society approvals.',
+  ),
+  'parlour' => const _SpaceOffering(
+    Icons.home_work_outlined,
+    'Coordinate funeral arrangements, service schedules and day-to-day operations.',
+  ),
+  'family' => const _SpaceOffering(
+    Icons.family_restroom,
+    'Keep family arrangements, important documents and updates together.',
+  ),
+  'supplier' => const _SpaceOffering(
+    Icons.local_shipping_outlined,
+    'Coordinate service requests, quotations and deliveries.',
+  ),
+  _ => _SpaceOffering(Icons.grid_view_outlined, fallbackTitle),
+};
+
+class _SpaceTypesError extends StatelessWidget {
+  const _SpaceTypesError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Text(message, textAlign: TextAlign.center),
+      const SizedBox(height: 8),
+      TextButton.icon(
+        key: const Key('retry-space-types'),
+        onPressed: onRetry,
+        icon: const Icon(Icons.refresh),
+        label: const Text('Retry'),
+      ),
+    ],
+  );
 }
 
 InputDecoration _inputDecoration({

@@ -8,6 +8,32 @@ class _FakeRegistrationApi extends RegistrationApi {
   const _FakeRegistrationApi();
 
   static bool verifyCalled = false;
+  static bool loginCalled = false;
+  static bool logoutCalled = false;
+  static String? loginIdentity;
+
+  @override
+  Future<Map<String, dynamic>> login({
+    required String identity,
+    required String password,
+  }) async {
+    loginCalled = true;
+    loginIdentity = identity;
+    return {'sessionToken': 'test-session-token'};
+  }
+
+  @override
+  Future<void> logout(String sessionToken) async {
+    logoutCalled = true;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listSpaceTypes() async => [
+    {'code': 'society', 'display_name': 'Society Space'},
+    {'code': 'parlour', 'display_name': 'Parlour Space'},
+    {'code': 'family', 'display_name': 'Family Space'},
+    {'code': 'supplier', 'display_name': 'Supplier Space'},
+  ];
 
   @override
   Future<Map<String, dynamic>> register(Map<String, Object?> payload) async => {
@@ -81,6 +107,65 @@ void main() {
     expect(find.byKey(const Key('registration-space')), findsOneWidget);
   });
 
+  testWidgets('login opens the Spaces hub and signs out', (tester) async {
+    tester.view.physicalSize = const Size(440, 956);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    _FakeRegistrationApi.loginCalled = false;
+    _FakeRegistrationApi.logoutCalled = false;
+    _FakeRegistrationApi.loginIdentity = null;
+
+    await tester.pumpWidget(
+      const FuneralSpacesApp(api: _FakeRegistrationApi()),
+    );
+    await tester.enterText(
+      find.byKey(const Key('identity-field')),
+      'amahle@example.org',
+    );
+    await tester.enterText(
+      find.byKey(const Key('password-field')),
+      'safe-password-123',
+    );
+    await tester.tap(find.byKey(const Key('login-button')));
+    await tester.pumpAndSettle();
+
+    expect(_FakeRegistrationApi.loginCalled, isTrue);
+    expect(_FakeRegistrationApi.loginIdentity, 'amahle@example.org');
+    expect(find.text('Spaces & offerings'), findsOneWidget);
+    expect(find.text('Your space'), findsOneWidget);
+    expect(find.text('0 accessible'), findsOneWidget);
+    expect(find.text('No active Spaces yet'), findsOneWidget);
+    expect(find.text('Society Space'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('space-offer-society')),
+      120,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('spaces-tab-content')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('space-offer-society')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('does not create membership'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('navigation-invitations')));
+    await tester.pumpAndSettle();
+    expect(find.text('No invitations yet'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('navigation-help')));
+    await tester.pumpAndSettle();
+    expect(find.text('Spaces stay separate'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('sign-out-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.logoutCalled, isTrue);
+    expect(find.text('Welcome back'), findsOneWidget);
+  });
+
   testWidgets('registration contains the requested account fields', (
     tester,
   ) async {
@@ -130,7 +215,9 @@ void main() {
     (tester) async {
       useTallTestViewport(tester);
       await tester.pumpWidget(
-        const MaterialApp(home: RegistrationScreen(api: _FakeRegistrationApi())),
+        const MaterialApp(
+          home: RegistrationScreen(api: _FakeRegistrationApi()),
+        ),
       );
 
       await tester.scrollUntilVisible(
@@ -154,7 +241,9 @@ void main() {
       _FakeRegistrationApi.verifyCalled = false;
       useTallTestViewport(tester);
       await tester.pumpWidget(
-        const MaterialApp(home: RegistrationScreen(api: _FakeRegistrationApi())),
+        const MaterialApp(
+          home: RegistrationScreen(api: _FakeRegistrationApi()),
+        ),
       );
 
       Future<void> fill(String key, String value) async {
@@ -199,14 +288,19 @@ void main() {
 
       expect(find.text('Confirm your email'), findsOneWidget);
       expect(find.byKey(const Key('registration-otp')), findsOneWidget);
-      expect(
-        find.text('Development code: 123456'),
-        findsOneWidget,
-      );
+      expect(find.text('Development code: 123456'), findsOneWidget);
 
-      await tester.enterText(find.byKey(const Key('registration-otp')), '123456');
+      await tester.enterText(
+        find.byKey(const Key('registration-otp')),
+        '123456',
+      );
       await tester.pump();
-      expect(tester.widget<FilledButton>(find.byKey(const Key('registration-verify'))).onPressed, isNotNull);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('registration-verify')))
+            .onPressed,
+        isNotNull,
+      );
       await tester.tap(find.byKey(const Key('registration-verify')));
       await tester.pumpAndSettle();
 
