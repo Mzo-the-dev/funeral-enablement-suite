@@ -1199,46 +1199,37 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(92),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 6,
+          preferredSize: const Size.fromHeight(42),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.grid_view_outlined, size: 13),
+                    SizedBox(width: 6),
+                    Text(
+                      'Society Space',
+                      style: TextStyle(
+                        color: AppColors.forest,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      border: Border.all(color: AppColors.border),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.grid_view_outlined, size: 13),
-                        SizedBox(width: 6),
-                        Text(
-                          'Society Space',
-                          style: TextStyle(
-                            color: AppColors.forest,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(width: 5),
-                        Icon(Icons.keyboard_arrow_down, size: 14),
-                      ],
-                    ),
-                  ),
+                    SizedBox(width: 5),
+                    Icon(Icons.keyboard_arrow_down, size: 14),
+                  ],
                 ),
               ),
-              _buildWorkspaceNavigation(),
-            ],
+            ),
           ),
         ),
       ),
@@ -1277,61 +1268,44 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
                 ),
               ),
             ),
+      bottomNavigationBar: _buildWorkspaceNavigation(),
     );
   }
 
   Widget _buildWorkspaceNavigation() {
     const tabs = [
-      ('Home', 'society-tab-home'),
-      ('Members', 'society-tab-members'),
-      ('Contributions', 'society-tab-contributions'),
-      ('Funeral cases', 'society-tab-cases'),
-      ('More', 'society-tab-more'),
+      ('Home', 'society-tab-home', Icons.home_outlined, Icons.home),
+      ('Members', 'society-tab-members', Icons.groups_outlined, Icons.groups),
+      (
+        'Contributions',
+        'society-tab-contributions',
+        Icons.payments_outlined,
+        Icons.payments,
+      ),
+      (
+        'Funeral cases',
+        'society-tab-cases',
+        Icons.assignment_outlined,
+        Icons.assignment,
+      ),
+      ('More', 'society-tab-more', Icons.more_horiz, Icons.more_horiz),
     ];
-    return Container(
-      height: 42,
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: [
-          for (var index = 0; index < tabs.length; index++)
-            Expanded(
-              child: InkWell(
-                key: Key(tabs[index].$2),
-                onTap: () => setState(() => _selectedTab = index),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: _selectedTab == index
-                            ? AppColors.forest
-                            : Colors.transparent,
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    tabs[index].$1,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _selectedTab == index
-                          ? AppColors.forest
-                          : AppColors.muted,
-                      fontSize: 10,
-                      fontWeight: _selectedTab == index
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+    return NavigationBar(
+      height: 68,
+      backgroundColor: AppColors.white,
+      indicatorColor: const Color(0xFFEAF1EC),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      selectedIndex: _selectedTab,
+      onDestinationSelected: (index) => setState(() => _selectedTab = index),
+      destinations: [
+        for (final tab in tabs)
+          NavigationDestination(
+            key: Key(tab.$2),
+            icon: Icon(tab.$3),
+            selectedIcon: Icon(tab.$4),
+            label: tab.$1,
+          ),
+      ],
     );
   }
 

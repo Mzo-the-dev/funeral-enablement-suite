@@ -382,6 +382,20 @@ void main() {
     await tester.tap(find.byKey(const Key('open-space-demo-space-id')));
     await tester.pumpAndSettle();
     expect(find.byType(SocietySpaceScreen), findsOneWidget);
+    final bottomNavigation = find.byType(NavigationBar);
+    expect(bottomNavigation, findsOneWidget);
+    for (final icon in [
+      Icons.home,
+      Icons.groups_outlined,
+      Icons.payments_outlined,
+      Icons.assignment_outlined,
+      Icons.more_horiz,
+    ]) {
+      expect(
+        find.descendant(of: bottomNavigation, matching: find.byIcon(icon)),
+        findsOneWidget,
+      );
+    }
     expect(find.textContaining(', Amahle'), findsOneWidget);
     expect(find.text('At a glance'), findsOneWidget);
     expect(find.text('October 2026 contributions'), findsOneWidget);
