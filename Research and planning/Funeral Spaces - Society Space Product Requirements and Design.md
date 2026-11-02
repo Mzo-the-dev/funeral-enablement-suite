@@ -694,6 +694,22 @@ Phase 1 may narrow this list after discovery. Preserve account/Space boundaries 
 6. Seed synthetic demo data only. Test constraints, permissions, tenant isolation, invitation expiry/revocation, idempotency, audit history, backup restoration, and migration compatibility.
 7. Document engine/version, migration status, backup policy, retention, monitoring, and recovery instructions for deployment.
 
+### 14.6 Existing-society onboarding workflow
+
+An existing society may arrive through an administrator-assisted setup or a structured import. Onboarding records membership and governance facts; it does not create platform accounts or authorize anyone to use a private Space.
+
+1. **Verify authority and scope.** Record the society's authorized representative, evidence/reference, source, requested Space visibility, and approving operator. Confirm that the society is entitled to submit the member and covered-life data and define the permitted purpose and retention.
+2. **Capture and stage.** Record a versioned onboarding batch with an idempotency key and source type. Accept a documented template for member number, names, active/deactivated state, join/deactivation dates, covered lives, requested office assignments, and society-approved fee rules. Keep raw source files out of logs and retain them only under an approved policy.
+3. **Validate before commit.** Check required fields, unique member numbers, statuses and dates, covered-life/member links, office-role uniqueness, money/currency precision, and batch counts. Return row-level errors and a reconciliation summary; do not silently guess or auto-correct conflicting identity or membership data.
+4. **Review and approve.** An authorized society representative confirms the roster, deactivated members, covered-life totals, office holders, discovery profile, and fee schedule. An operator records the review outcome and evidence reference. Approval requirements and officer-verification policy must be agreed before production use.
+5. **Commit atomically and idempotently.** In one transaction, create or update the society and its Space, record the committed batch, and persist the approved membership, covered-life, office, and effective-dated fee records. Enforce database constraints, use the batch idempotency key to make retries safe, and roll back the full commit on invariant failure. Never partially publish a failed batch.
+6. **Reconcile and report.** Compare received, accepted, rejected, active, deactivated, covered-life, and office counts with the approved summary. Record who committed and when, show actionable exceptions, and provide a minimized audit trail. A correction is a new reviewed batch or effective-dated change, not an undocumented overwrite.
+7. **Link accounts separately.** A member may claim/link a platform account only through a future verified identity and membership-matching workflow, with explicit authorization and audit. Society office titles do not grant platform permissions. Until that exists, imported members remain records only and private member data is not exposed by Space discovery.
+
+The current local implementation provides the migration, onboarding-batch data model, and a synthetic, idempotent database seed. It does not yet provide an upload/review UI or a real authority-verification workflow. The demo has 25 active and 10 deactivated members, ten covered lives per active member (250 total), six distinct active office holders, and a Society Space marked active/discoverable. Its society-specific ZAR fee schedule is R250.00 monthly and R1,000.00 joining fee, effective from the seed date; these values are not a system-wide default or posted payments. No app-user accounts are created or linked by the seed.
+
+**Automation acceptance criteria:** the same batch can be retried without duplicates; invalid batches cannot partially commit; reviewers can reconcile every accepted/rejected row and aggregate; fee changes preserve prior effective periods; and discovery returns only explicitly public Space fields, never roster, covered-life, fee, or office data.
+
 **Not yet specified:** deployment provider/region, identity provider, member data fields, invitation channel, password/passkey policy, MFA policy, notification provider, session/device policy, retention periods, row-level security usage, and cross-Space consent record. Validate with product, operational, technical, and South African legal/privacy experts where relevant.
 
 ## 15. Decisions to review before design approval
