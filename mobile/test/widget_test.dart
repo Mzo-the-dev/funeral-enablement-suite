@@ -36,6 +36,20 @@ class _FakeRegistrationApi extends RegistrationApi {
   ];
 
   @override
+  Future<List<Map<String, dynamic>>> listDiscoverableSpaces() async => [
+    {
+      'space_id': 'demo-space-id',
+      'display_name': 'Stronger Together Society',
+      'space_code': 'society',
+      'public_description': 'A synthetic demo Society Space.',
+    },
+  ];
+
+  @override
+  Future<List<Map<String, dynamic>>> listMySpaces(String sessionToken) async =>
+      [];
+
+  @override
   Future<Map<String, dynamic>> register(Map<String, Object?> payload) async => {
     'registrationId': '00000000-0000-4000-8000-000000000001',
     'status': 'pending_verification',
@@ -54,6 +68,154 @@ class _FakeRegistrationApi extends RegistrationApi {
   }
 }
 
+class _ActiveMembershipApi extends _FakeRegistrationApi {
+  const _ActiveMembershipApi();
+
+  @override
+  Future<List<Map<String, dynamic>>> listMySpaces(String sessionToken) async =>
+      [
+        {
+          'space_id': 'demo-space-id',
+          'display_name': 'Stronger Together Society',
+          'society_name': 'Stronger Together Society',
+          'space_code': 'society',
+          'role_code': 'member',
+          'member_number': 'STS-036',
+          'joined_at': '2026-11-02',
+          'covered_life_count': 0,
+        },
+      ];
+}
+
+class _DashboardApi extends _ActiveMembershipApi {
+  const _DashboardApi({
+    this.canApproveCases = false,
+    this.canApproveMemberships = false,
+  });
+
+  final bool canApproveCases;
+  final bool canApproveMemberships;
+
+  @override
+  Future<Map<String, dynamic>> getSocietyDashboard({
+    required String spaceId,
+    required String sessionToken,
+  }) async => {
+    'society': {
+      'space_id': spaceId,
+      'society_name': 'Stronger Together Society',
+    },
+    'current_member': {
+      'member_number': 'STS-036',
+      'given_name': 'Amahle',
+      'role_code': 'member',
+      'office_roles': [
+        if (canApproveCases) 'funeral_approver',
+        if (canApproveMemberships) 'chairperson',
+      ],
+    },
+    'permissions': {
+      'can_approve_funeral_cases': canApproveCases,
+      'can_approve_memberships': canApproveMemberships,
+    },
+    'summary': {
+      'period_start': '2026-10-01',
+      'active_members': 26,
+      'deactivated_members': 10,
+      'covered_lives': 250,
+      'total_due': 6500,
+      'total_collected': 6000,
+      'outstanding': 500,
+      'members_in_arrears': 2,
+      'pending_cases': 2,
+      'approved_cases': 1,
+      'monthly_contribution': 250,
+      'joining_fee': 1000,
+    },
+    'members': [
+      {
+        'member_number': 'STS-007',
+        'given_name': 'Lindiwe',
+        'surname': 'Mokoena',
+        'status': 'active',
+        'covered_lives': 2,
+        'arrears_amount': 250,
+        'is_in_arrears': true,
+      },
+      {
+        'member_number': 'STS-036',
+        'given_name': 'Amahle',
+        'surname': 'Dlamini',
+        'status': 'active',
+        'covered_lives': 0,
+        'arrears_amount': 0,
+        'is_in_arrears': false,
+      },
+      {
+        'member_number': 'STS-026',
+        'given_name': 'Thandi',
+        'surname': 'Ndlovu',
+        'status': 'deactivated',
+        'covered_lives': 0,
+        'arrears_amount': 0,
+        'is_in_arrears': false,
+      },
+    ],
+    'my_contributions': [
+      {
+        'period_start': '2026-10-01',
+        'amount_due': 250,
+        'amount_paid': 250,
+        'status': 'paid',
+      },
+    ],
+    'funeral_cases': [
+      {
+        'funeral_case_id': 'case-pending',
+        'case_reference': 'STS-FC-002',
+        'status': 'pending',
+        'summary': 'Awaiting approver review.',
+        'member_number': 'STS-007',
+        'given_name': 'Lindiwe',
+        'surname': 'Mokoena',
+      },
+      {
+        'funeral_case_id': 'case-approved',
+        'case_reference': 'STS-FC-001',
+        'status': 'approved',
+        'summary': 'Approved for demo review.',
+        'member_number': 'STS-004',
+        'given_name': 'Sipho',
+        'surname': 'Khumalo',
+      },
+    ],
+    'membership_requests': canApproveMemberships
+        ? [
+            {
+              'membership_request_id': 'request-1',
+              'requested_member_number': 'STS-040',
+              'given_name': 'Nandi',
+              'surname': 'Zwane',
+            },
+          ]
+        : <Map<String, dynamic>>[],
+  };
+
+  @override
+  Future<Map<String, dynamic>> approveMembershipRequest({
+    required String spaceId,
+    required String requestId,
+    required String sessionToken,
+  }) async => {'status': 'active'};
+
+  @override
+  Future<Map<String, dynamic>> approveFuneralCase({
+    required String spaceId,
+    required String caseId,
+    required String sessionToken,
+  }) async => {'status': 'approved'};
+}
+
 void main() {
   void useTallTestViewport(WidgetTester tester) {
     tester.view.physicalSize = const Size(430, 2200);
@@ -61,6 +223,14 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
   }
+
+  test('society greeting follows local time-of-day boundaries', () {
+    expect(societyGreetingFor(DateTime(2026, 11, 2, 0)), 'Good morning');
+    expect(societyGreetingFor(DateTime(2026, 11, 2, 11, 59)), 'Good morning');
+    expect(societyGreetingFor(DateTime(2026, 11, 2, 12)), 'Good afternoon');
+    expect(societyGreetingFor(DateTime(2026, 11, 2, 17, 59)), 'Good afternoon');
+    expect(societyGreetingFor(DateTime(2026, 11, 2, 18)), 'Good evening');
+  });
 
   testWidgets('starts with username and password login and a signup link', (
     tester,
@@ -147,8 +317,20 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('space-offer-society')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('does not create membership'), findsOneWidget);
+    expect(find.text('Explore societies'), findsOneWidget);
+    expect(find.text('Stronger Together Society'), findsOneWidget);
+    expect(find.byKey(const Key('society-logo-demo-space-id')), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('request-society-access-demo-space-id')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Access requests are not connected yet'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('navigation-invitations')));
@@ -164,6 +346,137 @@ void main() {
     await tester.pumpAndSettle();
     expect(_FakeRegistrationApi.logoutCalled, isTrue);
     expect(find.text('Welcome back'), findsOneWidget);
+  });
+
+  testWidgets('shows the linked society as an active Space', (tester) async {
+    tester.view.physicalSize = const Size(440, 956);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SpacesLandingScreen(
+          api: _DashboardApi(),
+          sessionToken: 'test-session-token',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 accessible'), findsOneWidget);
+    expect(find.byKey(const Key('active-space-demo-space-id')), findsOneWidget);
+    expect(find.text('Stronger Together Society'), findsOneWidget);
+    expect(find.text('Access enabled'), findsOneWidget);
+    expect(find.text('Open Stronger Together Society'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Explore other offerings'),
+      120,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('spaces-tab-content')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(find.byKey(const Key('offering-card-society')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('open-space-demo-space-id')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SocietySpaceScreen), findsOneWidget);
+    final bottomNavigation = find.byType(NavigationBar);
+    expect(bottomNavigation, findsOneWidget);
+    for (final icon in [
+      Icons.home,
+      Icons.groups_outlined,
+      Icons.payments_outlined,
+      Icons.assignment_outlined,
+      Icons.more_horiz,
+    ]) {
+      expect(
+        find.descendant(of: bottomNavigation, matching: find.byIcon(icon)),
+        findsOneWidget,
+      );
+    }
+    expect(find.textContaining(', Amahle'), findsOneWidget);
+    expect(find.text('At a glance'), findsOneWidget);
+    expect(find.text('October 2026 contributions'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('society-tab-members')));
+    await tester.pumpAndSettle();
+    expect(find.text('Lindiwe Mokoena'), findsOneWidget);
+    expect(find.text('Thandi Ndlovu'), findsOneWidget);
+    expect(find.text('Deactivated'), findsWidgets);
+    expect(find.text('In arrears · R250.00'), findsOneWidget);
+    expect(find.byKey(const Key('society-member-search')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('society-tab-contributions')));
+    await tester.pumpAndSettle();
+    expect(find.text('R6000.00 of R6500.00'), findsOneWidget);
+    expect(find.text('Your contribution history'), findsOneWidget);
+    expect(find.text('R250.00 paid of R250.00'), findsOneWidget);
+    expect(find.text('Lindiwe Mokoena'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.text('STS-FC-002'), findsOneWidget);
+    expect(find.text('STS-FC-001'), findsOneWidget);
+    expect(find.byKey(const Key('approve-case-case-pending')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('society-tab-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('STS-036'), findsOneWidget);
+    expect(find.text('R1000.00'), findsOneWidget);
+    expect(find.text('Membership applications'), findsNothing);
+  });
+
+  testWidgets('office approvals are limited to their assigned roles', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(440, 956);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Future<void> openDashboard(_DashboardApi api) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SocietySpaceScreen(
+            key: ValueKey(
+              '${api.canApproveCases}-${api.canApproveMemberships}',
+            ),
+            space: {
+              'space_id': 'demo-space-id',
+              'society_name': 'Stronger Together Society',
+              'role_code': 'member',
+              'joined_at': '2026-11-02',
+            },
+            api: api,
+            sessionToken: 'test-session-token',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await openDashboard(const _DashboardApi(canApproveCases: true));
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('approve-case-case-pending')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('society-tab-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('Membership applications'), findsNothing);
+    expect(find.byKey(const Key('approve-membership-request-1')), findsNothing);
+
+    await openDashboard(const _DashboardApi(canApproveMemberships: true));
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('approve-case-case-pending')), findsNothing);
+    await tester.tap(find.byKey(const Key('society-tab-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('Membership applications'), findsOneWidget);
+    expect(
+      find.byKey(const Key('approve-membership-request-1')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('registration contains the requested account fields', (

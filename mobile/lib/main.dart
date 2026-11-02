@@ -7,6 +7,12 @@ void main() {
   runApp(const FuneralSpacesApp());
 }
 
+String societyGreetingFor(DateTime time) {
+  if (time.hour < 12) return 'Good morning';
+  if (time.hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 abstract final class AppColors {
   static const background = Color(0xFFF7F5EF);
   static const forest = Color(0xFF174B3A);
@@ -358,6 +364,8 @@ class SpacesLandingScreen extends StatefulWidget {
 
 class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
   List<Map<String, dynamic>> _spaceTypes = [];
+  List<Map<String, dynamic>> _discoverableSpaces = [];
+  List<Map<String, dynamic>> _mySpaces = [];
   String? _loadError;
   bool _isLoading = true;
   bool _isSigningOut = false;
@@ -375,8 +383,18 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
       _loadError = null;
     });
     try {
-      final types = await widget.api.listSpaceTypes();
-      if (mounted) setState(() => _spaceTypes = types);
+      final results = await Future.wait([
+        widget.api.listSpaceTypes(),
+        widget.api.listDiscoverableSpaces(),
+        widget.api.listMySpaces(widget.sessionToken),
+      ]);
+      if (mounted) {
+        setState(() {
+          _spaceTypes = results[0];
+          _discoverableSpaces = results[1];
+          _mySpaces = results[2];
+        });
+      }
     } on RegistrationApiException catch (error) {
       if (mounted) setState(() => _loadError = error.message);
     } finally {
@@ -465,7 +483,7 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
               ),
             ),
             Text(
-              '0 accessible',
+              _isLoading ? 'Loading' : '${_mySpaces.length} accessible',
               style: TextStyle(
                 color: AppColors.muted,
                 fontSize: 10,
@@ -475,42 +493,52 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
           ],
         ),
         const SizedBox(height: 8),
-        Container(
-          key: const Key('empty-memberships'),
-          constraints: const BoxConstraints(minHeight: 65),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.groups_outlined, color: AppColors.muted, size: 18),
-              SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'No active Spaces yet',
-                      style: TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+        if (_isLoading)
+          const LinearProgressIndicator()
+        else if (_loadError != null)
+          Text(
+            'Could not load your Spaces. ${_loadError!}',
+            style: const TextStyle(color: AppColors.muted, fontSize: 11),
+          )
+        else if (_mySpaces.isEmpty)
+          Container(
+            key: const Key('empty-memberships'),
+            constraints: const BoxConstraints(minHeight: 65),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.groups_outlined, color: AppColors.muted, size: 18),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'No active Spaces yet',
+                        style: TextStyle(
+                          color: AppColors.ink,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'An account does not automatically grant Space access.',
-                      style: TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 10,
-                        height: 1.35,
+                      SizedBox(height: 3),
+                      Text(
+                        'An account does not automatically grant Space access.',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 10,
+                          height: 1.35,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ),
+              ],
+            ),
+          )
+        else
+          ..._mySpaces.map(_buildActiveSpace),
         const SizedBox(height: 8),
         const Text(
           'Explore other offerings',
@@ -538,7 +566,13 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
         else if (_spaceTypes.isEmpty)
           const Text('No Space offerings are currently available.')
         else ...[
-          ..._spaceTypes.map(_buildSpaceType),
+          ..._spaceTypes
+              .where(
+                (spaceType) => !_mySpaces.any(
+                  (space) => space['space_code'] == spaceType['code'],
+                ),
+              )
+              .map(_buildSpaceType),
           _sharedCaseCard(),
         ],
         const SizedBox(height: 12),
@@ -609,6 +643,121 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
     );
   }
 
+  Widget _buildActiveSpace(Map<String, dynamic> space) {
+    final spaceId = space['space_id'] as String? ?? '';
+    final displayName = space['display_name'] as String? ?? 'Society Space';
+    final societyName = space['society_name'] as String? ?? displayName;
+
+    return Container(
+      key: Key('active-space-$spaceId'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF1EC),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.groups_outlined,
+                  color: AppColors.forest,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          color: AppColors.forest,
+                          size: 11,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Access enabled',
+                          style: TextStyle(
+                            color: AppColors.forest,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your membership is active in $societyName.',
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 10,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 34,
+            child: FilledButton.icon(
+              key: Key('open-space-$spaceId'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SocietySpaceScreen(
+                    space: space,
+                    api: widget.api,
+                    sessionToken: widget.sessionToken,
+                  ),
+                ),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.forest,
+                foregroundColor: AppColors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              icon: const Icon(Icons.arrow_forward, size: 14),
+              label: Text('Open $displayName'),
+              iconAlignment: IconAlignment.end,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHelpTab() {
     return ListView(
       key: const Key('help-tab-content'),
@@ -657,7 +806,22 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
         icon: offering.icon,
         actionLabel: 'Explore & request access',
         actionKey: Key('space-offer-$code'),
-        onPressed: () => _showAccessInfo(displayName),
+        onPressed: () {
+          if (code == 'society') {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SocietyDirectoryScreen(
+                  spaces: _discoverableSpaces,
+                  loadError: _loadError,
+                  isLoading: _isLoading,
+                  onRetry: _loadSpaceTypes,
+                ),
+              ),
+            );
+          } else {
+            _showAccessInfo(displayName);
+          }
+        },
       ),
     );
   }
@@ -710,6 +874,1421 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SocietySpaceScreen extends StatefulWidget {
+  const SocietySpaceScreen({
+    super.key,
+    required this.space,
+    required this.api,
+    required this.sessionToken,
+  });
+
+  final Map<String, dynamic> space;
+  final RegistrationApi api;
+  final String sessionToken;
+
+  @override
+  State<SocietySpaceScreen> createState() => _SocietySpaceScreenState();
+}
+
+class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
+  int _selectedTab = 0;
+  Map<String, dynamic> _dashboard = {};
+  String? _loadError;
+  bool _isLoading = true;
+  String _memberSearch = '';
+  String _memberStatusFilter = 'all';
+
+  String get _spaceId => widget.space['space_id'] as String? ?? '';
+
+  Map<String, dynamic> get _currentMember =>
+      _asMap(_dashboard['current_member']);
+  Map<String, dynamic> get _permissions => _asMap(_dashboard['permissions']);
+  Map<String, dynamic> get _summary => _asMap(_dashboard['summary']);
+  List<Map<String, dynamic>> get _members => _asMaps(_dashboard['members']);
+  List<Map<String, dynamic>> get _contributions =>
+      _asMaps(_dashboard['my_contributions']);
+  List<Map<String, dynamic>> get _cases => _asMaps(_dashboard['funeral_cases']);
+  List<Map<String, dynamic>> get _membershipRequests =>
+      _asMaps(_dashboard['membership_requests']);
+
+  String get _societyName =>
+      widget.space['society_name'] as String? ??
+      widget.space['display_name'] as String? ??
+      'Society';
+
+  String get _roleName {
+    final roles = _currentMember['office_roles'];
+    if (roles is List && roles.isNotEmpty) {
+      return roles.map((role) => _formatRole('$role')).join(', ');
+    }
+    return _formatRole(
+      _currentMember['role_code'] as String? ??
+          widget.space['role_code'] as String? ??
+          'member',
+    );
+  }
+
+  String _formatRole(String role) => role
+      .split('_')
+      .map(
+        (word) => word.isEmpty
+            ? word
+            : '${word[0].toUpperCase()}${word.substring(1)}',
+      )
+      .join(' ');
+
+  String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty);
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) =>
+      value is Map ? value.cast<String, dynamic>() : <String, dynamic>{};
+
+  List<Map<String, dynamic>> _asMaps(dynamic value) => value is List
+      ? value
+            .whereType<Map>()
+            .map((item) => item.cast<String, dynamic>())
+            .toList()
+      : <Map<String, dynamic>>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboard();
+  }
+
+  Future<void> _loadDashboard() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final dashboard = await widget.api.getSocietyDashboard(
+        spaceId: _spaceId,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) setState(() => _dashboard = dashboard);
+    } on RegistrationApiException catch (error) {
+      if (mounted) setState(() => _loadError = error.message);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  String _money(dynamic amount) {
+    final value = amount is num ? amount : num.tryParse('$amount') ?? 0;
+    return 'R${value.toStringAsFixed(2)}';
+  }
+
+  String _periodLabel(String? value) {
+    final date = value == null ? null : DateTime.tryParse(value);
+    return date == null
+        ? 'Latest period'
+        : MaterialLocalizations.of(context).formatMonthYear(date);
+  }
+
+  Widget _pageHeading(String title, String subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          color: AppColors.ink,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        subtitle,
+        style: const TextStyle(
+          color: AppColors.muted,
+          fontSize: 11,
+          height: 1.4,
+        ),
+      ),
+    ],
+  );
+
+  Widget _panel(
+    Widget child, {
+    EdgeInsetsGeometry padding = const EdgeInsets.all(12),
+    EdgeInsetsGeometry margin = EdgeInsets.zero,
+  }) => Container(
+    margin: margin,
+    padding: padding,
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.border),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: child,
+  );
+
+  Widget _metric(String label, String value, {String? detail}) => Container(
+    constraints: const BoxConstraints(minHeight: 76),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.white,
+      border: Border.all(color: AppColors.border),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.muted, fontSize: 9),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (detail != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            detail,
+            style: const TextStyle(color: AppColors.muted, fontSize: 8),
+          ),
+        ],
+      ],
+    ),
+  );
+
+  Widget _statusLabel(String status) {
+    final isPositive =
+        status == 'active' || status == 'paid' || status == 'approved';
+    final color = isPositive ? AppColors.forest : const Color(0xFF8A5412);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: isPositive ? const Color(0xFFEAF1EC) : const Color(0xFFFFF1D9),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        _formatRole(status),
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  void _showWorkspaceMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _approveCase(String caseId) async {
+    try {
+      await widget.api.approveFuneralCase(
+        spaceId: _spaceId,
+        caseId: caseId,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) await _loadDashboard();
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _approveMembership(String requestId) async {
+    try {
+      await widget.api.approveMembershipRequest(
+        spaceId: _spaceId,
+        requestId: requestId,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) await _loadDashboard();
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.white,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
+        titleSpacing: 0,
+        toolbarHeight: 68,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.spa_outlined,
+                    color: AppColors.forest,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _societyName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Text(
+                        'Together, with care',
+                        style: TextStyle(color: AppColors.muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 14),
+            child: Center(
+              child: CircleAvatar(
+                radius: 19,
+                backgroundColor: AppColors.white,
+                foregroundColor: AppColors.forest,
+                child: Text(
+                  _initials(
+                    '${_currentMember['given_name'] ?? ''} ${_currentMember['surname'] ?? ''}',
+                  ),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(42),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.grid_view_outlined, size: 13),
+                    SizedBox(width: 6),
+                    Text(
+                      'Society Space',
+                      style: TextStyle(
+                        color: AppColors.forest,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(width: 5),
+                    Icon(Icons.keyboard_arrow_down, size: 14),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_loadError!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _loadDashboard,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: IndexedStack(
+                  index: _selectedTab,
+                  children: [
+                    _buildHomeTab(),
+                    _buildMembersTab(),
+                    _buildContributionsTab(),
+                    _buildFuneralCasesTab(),
+                    _buildMoreTab(),
+                  ],
+                ),
+              ),
+            ),
+      bottomNavigationBar: _buildWorkspaceNavigation(),
+    );
+  }
+
+  Widget _buildWorkspaceNavigation() {
+    const tabs = [
+      ('Home', 'society-tab-home', Icons.home_outlined, Icons.home),
+      ('Members', 'society-tab-members', Icons.groups_outlined, Icons.groups),
+      (
+        'Contributions',
+        'society-tab-contributions',
+        Icons.payments_outlined,
+        Icons.payments,
+      ),
+      (
+        'Funeral cases',
+        'society-tab-cases',
+        Icons.assignment_outlined,
+        Icons.assignment,
+      ),
+      ('More', 'society-tab-more', Icons.more_horiz, Icons.more_horiz),
+    ];
+    return NavigationBar(
+      height: 68,
+      backgroundColor: AppColors.white,
+      indicatorColor: const Color(0xFFEAF1EC),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      selectedIndex: _selectedTab,
+      onDestinationSelected: (index) => setState(() => _selectedTab = index),
+      destinations: [
+        for (final tab in tabs)
+          NavigationDestination(
+            key: Key(tab.$2),
+            icon: Icon(tab.$3),
+            selectedIcon: Icon(tab.$4),
+            label: tab.$1,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildHomeTab() {
+    final pendingCases = _summary['pending_cases'] as int? ?? 0;
+    final approvedCases = _summary['approved_cases'] as int? ?? 0;
+    final arrearsCount = _summary['members_in_arrears'] as int? ?? 0;
+    final memberName = _currentMember['given_name'] as String? ?? 'member';
+    final now = DateTime.now();
+    final totalDue = _toDouble(_summary['total_due']);
+    final totalCollected = _toDouble(_summary['total_collected']);
+    final contributionProgress = totalDue <= 0
+        ? 0.0
+        : (totalCollected / totalDue).clamp(0.0, 1.0);
+    final contributionPercent = (contributionProgress * 100).round();
+    return ListView(
+      key: const Key('society-space-home'),
+      padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
+      children: [
+        Text(
+          _formattedHomeDate(now),
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${societyGreetingFor(now)}, $memberName',
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 34,
+            height: 1.12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 7),
+        const Text(
+          'Here’s where your society stands today.',
+          style: TextStyle(color: AppColors.muted, fontSize: 14, height: 1.4),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'At a glance',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _panel(
+          Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _homeMetric(
+                      'Active members',
+                      '${_summary['active_members'] ?? 0}',
+                      '${_summary['covered_lives'] ?? 0} covered lives',
+                    ),
+                  ),
+                  Container(width: 1, height: 74, color: AppColors.border),
+                  Expanded(
+                    child: _homeMetric(
+                      'Open funeral cases',
+                      '${pendingCases + approvedCases}',
+                      '$pendingCases pending · $approvedCases approved',
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 1, color: AppColors.border),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 13, 2, 1),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${_periodLabel(_summary['period_start'] as String?)} contributions',
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '$contributionPercent% collected',
+                          style: const TextStyle(
+                            color: AppColors.forest,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          _money(_summary['total_collected']),
+                          style: const TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'of ${_money(_summary['total_due'])} due',
+                          style: const TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: contributionProgress,
+                        minHeight: 4,
+                        color: AppColors.forest,
+                        backgroundColor: AppColors.border,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$arrearsCount members in arrears',
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          key: const Key('home-view-contributions'),
+                          onPressed: () => setState(() => _selectedTab = 2),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            'View contributions →',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          'Needs attention',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        if (pendingCases > 0)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(
+              Icons.assignment_outlined,
+              color: AppColors.forest,
+            ),
+            title: Text(
+              '$pendingCases funeral cases awaiting review',
+              style: const TextStyle(fontSize: 11),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => setState(() => _selectedTab = 3),
+          ),
+        if (arrearsCount > 0)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(
+              Icons.payments_outlined,
+              color: AppColors.forest,
+            ),
+            title: Text(
+              '$arrearsCount members in arrears',
+              style: const TextStyle(fontSize: 11),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => setState(() => _selectedTab = 1),
+          ),
+        if (pendingCases == 0 && arrearsCount == 0)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              'No items need attention right now.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _homeMetric(String label, String value, String detail) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: AppColors.muted, fontSize: 10),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 23,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          detail,
+          style: const TextStyle(color: AppColors.muted, fontSize: 9),
+        ),
+      ],
+    ),
+  );
+
+  String _formattedHomeDate(DateTime date) {
+    const weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${weekdays[date.weekday - 1].toUpperCase()}, ${date.day} ${months[date.month - 1].toUpperCase()} ${date.year}';
+  }
+
+  double _toDouble(dynamic value) =>
+      value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+
+  Widget _buildMembersTab() {
+    final query = _memberSearch.trim().toLowerCase();
+    final activeCount = _members
+        .where((member) => member['status'] == 'active')
+        .length;
+    final visibleMembers = _members.where((member) {
+      final matchesStatus =
+          _memberStatusFilter == 'all' ||
+          member['status'] == _memberStatusFilter;
+      final name = '${member['given_name'] ?? ''} ${member['surname'] ?? ''}'
+          .toLowerCase();
+      final number = (member['member_number'] as String? ?? '').toLowerCase();
+      return matchesStatus &&
+          (query.isEmpty || name.contains(query) || number.contains(query));
+    }).toList();
+    return ListView(
+      key: const Key('society-space-members'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        _pageHeading(
+          'Members',
+          'Roster, membership status, and arrears are visible to society members.',
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: _metric('Active', '$activeCount')),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _metric('Deactivated', '${_members.length - activeCount}'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          key: const Key('society-member-search'),
+          onChanged: (value) => setState(() => _memberSearch = value),
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search, size: 18),
+            hintText: 'Search name or member number',
+            isDense: true,
+            filled: true,
+            fillColor: AppColors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: AppColors.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: AppColors.border),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'active', label: Text('Active')),
+            ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
+            ButtonSegment(value: 'all', label: Text('All')),
+          ],
+          selected: {_memberStatusFilter},
+          onSelectionChanged: (selection) =>
+              setState(() => _memberStatusFilter = selection.first),
+          showSelectedIcon: false,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Showing ${visibleMembers.length} of ${_members.length} members',
+          style: const TextStyle(color: AppColors.muted, fontSize: 9),
+        ),
+        const SizedBox(height: 5),
+        ...visibleMembers.map((member) {
+          final name =
+              '${member['given_name'] ?? ''} ${member['surname'] ?? ''}'.trim();
+          final inArrears = member['is_in_arrears'] == true;
+          return _panel(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: const Color(0xFFEAF1EC),
+                  foregroundColor: AppColors.forest,
+                  child: Text(
+                    _initials(name),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          color: AppColors.ink,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${member['member_number']} · ${member['covered_lives'] ?? 0} covered lives',
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 9,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        inArrears
+                            ? 'In arrears · ${_money(member['arrears_amount'])}'
+                            : 'Up to date',
+                        style: TextStyle(
+                          color: inArrears
+                              ? const Color(0xFF8A5412)
+                              : AppColors.forest,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _statusLabel(member['status'] as String? ?? 'active'),
+              ],
+            ),
+            margin: const EdgeInsets.only(bottom: 7),
+            padding: const EdgeInsets.all(10),
+          );
+        }),
+        if (visibleMembers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 22),
+            child: Center(child: Text('No members match this filter.')),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildContributionsTab() {
+    return ListView(
+      key: const Key('society-space-contributions'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        _pageHeading(
+          'Contributions',
+          'Society totals are transparent. Your detailed history is private to you.',
+        ),
+        const SizedBox(height: 10),
+        _panel(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Society total',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _periodLabel(_summary['period_start'] as String?),
+                    style: const TextStyle(color: AppColors.muted, fontSize: 9),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${_money(_summary['total_collected'])} of ${_money(_summary['total_due'])}',
+                style: const TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${_money(_summary['outstanding'])} outstanding · ${_summary['members_in_arrears'] ?? 0} members in arrears',
+                style: const TextStyle(color: AppColors.muted, fontSize: 10),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Monthly contribution: ${_money(_summary['monthly_contribution'])}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Your contribution history',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 7),
+        if (_contributions.isEmpty)
+          const Text(
+            'No contribution entries are recorded for your membership yet.',
+            style: TextStyle(color: AppColors.muted, fontSize: 11),
+          )
+        else
+          ..._contributions.map(
+            (contribution) => _panel(
+              Row(
+                children: [
+                  const Icon(
+                    Icons.receipt_long_outlined,
+                    color: AppColors.forest,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _periodLabel(contribution['period_start'] as String?),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${_money(contribution['amount_paid'])} paid of ${_money(contribution['amount_due'])}',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _statusLabel(contribution['status'] as String? ?? 'unpaid'),
+                ],
+              ),
+              margin: const EdgeInsets.only(bottom: 7),
+              padding: const EdgeInsets.all(10),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFuneralCasesTab() {
+    final canApprove = _permissions['can_approve_funeral_cases'] == true;
+    return ListView(
+      key: const Key('society-space-cases'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        _pageHeading(
+          'Funeral cases',
+          'Case status is visible to society members. Approval is limited to the assigned Funeral Approver.',
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _metric('Pending', '${_summary['pending_cases'] ?? 0}'),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _metric('Approved', '${_summary['approved_cases'] ?? 0}'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (_cases.isEmpty)
+          const Text(
+            'No funeral cases have been recorded.',
+            style: TextStyle(color: AppColors.muted, fontSize: 11),
+          )
+        else
+          ..._cases.map((caseRecord) {
+            final caseId = caseRecord['funeral_case_id'] as String? ?? '';
+            final status = caseRecord['status'] as String? ?? 'pending';
+            final memberName =
+                '${caseRecord['given_name'] ?? ''} ${caseRecord['surname'] ?? ''}'
+                    .trim();
+            return _panel(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          caseRecord['case_reference'] as String? ??
+                              'Funeral case',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      _statusLabel(status),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    'Member ${caseRecord['member_number']} · $memberName',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 9),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    caseRecord['summary'] as String? ?? '',
+                    style: const TextStyle(fontSize: 10, height: 1.4),
+                  ),
+                  if (status == 'pending' && canApprove) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: Key('approve-case-$caseId'),
+                        onPressed: () => _approveCase(caseId),
+                        icon: const Icon(Icons.verified_outlined, size: 16),
+                        label: const Text('Approve case'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.forest,
+                          foregroundColor: AppColors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              margin: const EdgeInsets.only(bottom: 8),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildMoreTab() {
+    final joinedAt = widget.space['joined_at'] as String?;
+    final joinedDate = joinedAt == null ? null : DateTime.tryParse(joinedAt);
+    final joinedLabel = joinedDate == null
+        ? 'Not available'
+        : MaterialLocalizations.of(context).formatMediumDate(joinedDate);
+    return ListView(
+      key: const Key('society-space-more'),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        _pageHeading('More', 'Your membership and society information.'),
+        const SizedBox(height: 10),
+        _panel(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Your membership',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 5),
+              _SocietyInfoRow(
+                icon: Icons.badge_outlined,
+                label: 'Member number',
+                value:
+                    _currentMember['member_number'] as String? ??
+                    widget.space['member_number'] as String? ??
+                    'Not available',
+              ),
+              _SocietyInfoRow(
+                icon: Icons.account_circle_outlined,
+                label: 'Your role',
+                value: _roleName,
+              ),
+              _SocietyInfoRow(
+                icon: Icons.calendar_today_outlined,
+                label: 'Member since',
+                value: joinedLabel,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        _panel(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Approved fees',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 5),
+              _SocietyInfoRow(
+                icon: Icons.payments_outlined,
+                label: 'Monthly contribution',
+                value: _money(_summary['monthly_contribution']),
+              ),
+              _SocietyInfoRow(
+                icon: Icons.person_add_alt_outlined,
+                label: 'Joining fee',
+                value: _summary['joining_fee'] == null
+                    ? 'Not configured'
+                    : _money(_summary['joining_fee']),
+              ),
+            ],
+          ),
+        ),
+        if (_permissions['can_approve_memberships'] == true) ...[
+          const SizedBox(height: 16),
+          _buildMembershipApprovals(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMembershipApprovals() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Membership applications',
+        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 6),
+      if (_membershipRequests.isEmpty)
+        const Text(
+          'No applications are waiting for your review.',
+          style: TextStyle(color: AppColors.muted, fontSize: 11),
+        )
+      else
+        ..._membershipRequests.map((request) {
+          final requestId = request['membership_request_id'] as String? ?? '';
+          return _panel(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${request['given_name'] ?? ''} ${request['surname'] ?? ''}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Member number ${request['requested_member_number']}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 9),
+                ),
+                const SizedBox(height: 7),
+                FilledButton(
+                  key: Key('approve-membership-$requestId'),
+                  onPressed: () => _approveMembership(requestId),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.forest,
+                    foregroundColor: AppColors.white,
+                  ),
+                  child: const Text('Approve membership'),
+                ),
+              ],
+            ),
+            margin: const EdgeInsets.only(bottom: 7),
+          );
+        }),
+    ],
+  );
+}
+
+class _SocietyInfoRow extends StatelessWidget {
+  const _SocietyInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.forest, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SocietyDirectoryScreen extends StatelessWidget {
+  const SocietyDirectoryScreen({
+    super.key,
+    required this.spaces,
+    required this.isLoading,
+    required this.onRetry,
+    this.loadError,
+  });
+
+  final List<Map<String, dynamic>> spaces;
+  final bool isLoading;
+  final String? loadError;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
+        title: const Text('Explore societies'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        children: [
+          const Text(
+            'Societies',
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Browse public profiles. Access to society information requires approval.',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (isLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (loadError != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  loadError!,
+                  style: const TextStyle(color: AppColors.muted),
+                ),
+                TextButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try again'),
+                ),
+              ],
+            )
+          else if (spaces.isEmpty)
+            const Text(
+              'No societies are listed yet.',
+              style: TextStyle(color: AppColors.muted, fontSize: 13),
+            )
+          else
+            ...spaces.map((space) => _SocietyDirectoryCard(space: space)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SocietyDirectoryCard extends StatelessWidget {
+  const _SocietyDirectoryCard({required this.space});
+
+  final Map<String, dynamic> space;
+
+  @override
+  Widget build(BuildContext context) {
+    final spaceId = space['space_id'] as String? ?? '';
+    final displayName = space['display_name'] as String? ?? 'Society Space';
+    final description =
+        space['public_description'] as String? ??
+        'View public information about this Society Space.';
+
+    return Container(
+      key: Key('society-directory-card-$spaceId'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FBF9),
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SocietyMonogramLogo(
+                key: Key('society-logo-$spaceId'),
+                name: displayName,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Text(
+                      'Society Space · Public profile',
+                      style: TextStyle(color: AppColors.muted, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              key: Key('request-society-access-$spaceId'),
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text(displayName),
+                  content: const Text(
+                    'Access requests are not connected yet. Public discovery does not grant access to members, covered lives, fees, or committee records.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ),
+              icon: const Icon(Icons.lock_outline, size: 16),
+              label: const Text('Request access'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.forest,
+                foregroundColor: AppColors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(7),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SocietyMonogramLogo extends StatelessWidget {
+  const _SocietyMonogramLogo({super.key, required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .take(3)
+        .map((word) => word[0].toUpperCase())
+        .join();
+
+    return Container(
+      width: 54,
+      height: 54,
+      decoration: BoxDecoration(
+        color: AppColors.forest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -960,14 +2539,18 @@ class _OfferingCard extends StatelessWidget {
         const SizedBox(height: 6),
         const Divider(height: 1, color: AppColors.border),
         SizedBox(
-          height: 30,
-          child: TextButton(
+          height: 34,
+          child: FilledButton(
             key: actionKey,
             onPressed: onPressed,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.forest,
-              padding: EdgeInsets.zero,
-              alignment: Alignment.centerLeft,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.forest,
+              foregroundColor: AppColors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 9),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
               textStyle: const TextStyle(
                 fontSize: 9,
                 fontWeight: FontWeight.w700,
