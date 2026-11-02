@@ -2539,7 +2539,8 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
   void initState() {
     super.initState();
     _preferredNameController = TextEditingController(
-      text: widget.profile['preferred_name'] as String? ??
+      text:
+          widget.profile['preferred_name'] as String? ??
           widget.profile['given_name'] as String? ??
           '',
     );
@@ -2575,7 +2576,9 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
     final bytes = await file.readAsBytes();
     if (!mounted) return;
     if (bytes.length > 512 * 1024) {
-      setState(() => _errorMessage = 'Profile images must be 512 KB or smaller.');
+      setState(
+        () => _errorMessage = 'Profile images must be 512 KB or smaller.',
+      );
       return;
     }
     setState(() {
@@ -2618,7 +2621,8 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final avatarBytes = _selectedImageBytes ??
+    final avatarBytes =
+        _selectedImageBytes ??
         (_clearAvatar ? null : _decodeAvatar(widget.profile));
     return AlertDialog(
       title: const Text('Edit profile'),

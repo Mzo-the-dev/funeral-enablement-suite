@@ -239,7 +239,7 @@ erDiagram
 | `society` / `space`         | Society organization and its Space directory profile.                                  | Active Stronger Together Society and discoverable Society Space.                                                                                                                |
 | `society_member`            | Society roster identity, distinct from an app account.                                 | Synthetic member number and optional linked app account.                                                                                                                        |
 | `space_membership`          | Account authorization to one Space, with an explicit lifecycle.                        | Active member access, scoped to a society and optionally linked roster record.                                                                                                  |
-| `schema_migration`          | Applied database migration versions.                                                   | Versions `001_auth_registration` through `005_user_profile_avatar`.                                                                                                              |
+| `schema_migration`          | Applied database migration versions.                                                   | Versions `001_auth_registration` through `005_user_profile_avatar`.                                                                                                             |
 
 ## 4. Registration journey through the tables
 
