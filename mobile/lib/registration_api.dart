@@ -44,10 +44,28 @@ class RegistrationApi {
     await _post('/sessions/logout', {'sessionToken': sessionToken});
   }
 
-  Future<List<Map<String, dynamic>>> listSpaceTypes() async {
+  Future<List<Map<String, dynamic>>> listSpaceTypes() {
+    return _getList('/spaces/types');
+  }
+
+  Future<List<Map<String, dynamic>>> listDiscoverableSpaces() {
+    return _getList('/spaces/discoverable');
+  }
+
+  Future<List<Map<String, dynamic>>> listMySpaces(String sessionToken) {
+    return _getList(
+      '/spaces/mine',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _getList(
+    String path, {
+    Map<String, String> headers = const {},
+  }) async {
     try {
       final response = await http
-          .get(Uri.parse('$_baseUrl/spaces/types'))
+          .get(Uri.parse('$_baseUrl$path'), headers: headers)
           .timeout(const Duration(seconds: 15));
       final decoded = jsonDecode(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {

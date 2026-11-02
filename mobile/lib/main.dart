@@ -358,6 +358,8 @@ class SpacesLandingScreen extends StatefulWidget {
 
 class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
   List<Map<String, dynamic>> _spaceTypes = [];
+  List<Map<String, dynamic>> _discoverableSpaces = [];
+  List<Map<String, dynamic>> _mySpaces = [];
   String? _loadError;
   bool _isLoading = true;
   bool _isSigningOut = false;
@@ -375,8 +377,18 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
       _loadError = null;
     });
     try {
-      final types = await widget.api.listSpaceTypes();
-      if (mounted) setState(() => _spaceTypes = types);
+      final results = await Future.wait([
+        widget.api.listSpaceTypes(),
+        widget.api.listDiscoverableSpaces(),
+        widget.api.listMySpaces(widget.sessionToken),
+      ]);
+      if (mounted) {
+        setState(() {
+          _spaceTypes = results[0];
+          _discoverableSpaces = results[1];
+          _mySpaces = results[2];
+        });
+      }
     } on RegistrationApiException catch (error) {
       if (mounted) setState(() => _loadError = error.message);
     } finally {
@@ -465,7 +477,7 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
               ),
             ),
             Text(
-              '0 accessible',
+              _isLoading ? 'Loading' : '${_mySpaces.length} accessible',
               style: TextStyle(
                 color: AppColors.muted,
                 fontSize: 10,
@@ -475,42 +487,52 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
           ],
         ),
         const SizedBox(height: 8),
-        Container(
-          key: const Key('empty-memberships'),
-          constraints: const BoxConstraints(minHeight: 65),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.groups_outlined, color: AppColors.muted, size: 18),
-              SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'No active Spaces yet',
-                      style: TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+        if (_isLoading)
+          const LinearProgressIndicator()
+        else if (_loadError != null)
+          Text(
+            'Could not load your Spaces. ${_loadError!}',
+            style: const TextStyle(color: AppColors.muted, fontSize: 11),
+          )
+        else if (_mySpaces.isEmpty)
+          Container(
+            key: const Key('empty-memberships'),
+            constraints: const BoxConstraints(minHeight: 65),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.groups_outlined, color: AppColors.muted, size: 18),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'No active Spaces yet',
+                        style: TextStyle(
+                          color: AppColors.ink,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      'An account does not automatically grant Space access.',
-                      style: TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 10,
-                        height: 1.35,
+                      SizedBox(height: 3),
+                      Text(
+                        'An account does not automatically grant Space access.',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 10,
+                          height: 1.35,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ),
+              ],
+            ),
+          )
+        else
+          ..._mySpaces.map(_buildActiveSpace),
         const SizedBox(height: 8),
         const Text(
           'Explore other offerings',
@@ -538,7 +560,13 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
         else if (_spaceTypes.isEmpty)
           const Text('No Space offerings are currently available.')
         else ...[
-          ..._spaceTypes.map(_buildSpaceType),
+          ..._spaceTypes
+              .where(
+                (spaceType) => !_mySpaces.any(
+                  (space) => space['space_code'] == spaceType['code'],
+                ),
+              )
+              .map(_buildSpaceType),
           _sharedCaseCard(),
         ],
         const SizedBox(height: 12),
@@ -609,6 +637,131 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
     );
   }
 
+  Widget _buildActiveSpace(Map<String, dynamic> space) {
+    final spaceId = space['space_id'] as String? ?? '';
+    final displayName = space['display_name'] as String? ?? 'Society Space';
+    final societyName = space['society_name'] as String? ?? displayName;
+
+    return Container(
+      key: Key('active-space-$spaceId'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF1EC),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.groups_outlined,
+                  color: AppColors.forest,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          color: AppColors.forest,
+                          size: 11,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Access enabled',
+                          style: TextStyle(
+                            color: AppColors.forest,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your membership is active in $societyName.',
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 10,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 34,
+            child: FilledButton.icon(
+              key: Key('open-space-$spaceId'),
+              onPressed: () => _showActiveSpaceInfo(displayName),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.forest,
+                foregroundColor: AppColors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              icon: const Icon(Icons.arrow_forward, size: 14),
+              label: Text('Open $displayName'),
+              iconAlignment: IconAlignment.end,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showActiveSpaceInfo(String displayName) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(displayName),
+        content: const Text(
+          'Your membership is active. The Society workspace content is not available in this preview yet.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHelpTab() {
     return ListView(
       key: const Key('help-tab-content'),
@@ -657,7 +810,22 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
         icon: offering.icon,
         actionLabel: 'Explore & request access',
         actionKey: Key('space-offer-$code'),
-        onPressed: () => _showAccessInfo(displayName),
+        onPressed: () {
+          if (code == 'society') {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SocietyDirectoryScreen(
+                  spaces: _discoverableSpaces,
+                  loadError: _loadError,
+                  isLoading: _isLoading,
+                  onRetry: _loadSpaceTypes,
+                ),
+              ),
+            );
+          } else {
+            _showAccessInfo(displayName);
+          }
+        },
       ),
     );
   }
@@ -710,6 +878,217 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SocietyDirectoryScreen extends StatelessWidget {
+  const SocietyDirectoryScreen({
+    super.key,
+    required this.spaces,
+    required this.isLoading,
+    required this.onRetry,
+    this.loadError,
+  });
+
+  final List<Map<String, dynamic>> spaces;
+  final bool isLoading;
+  final String? loadError;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
+        title: const Text('Explore societies'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        children: [
+          const Text(
+            'Societies',
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Browse public profiles. Access to society information requires approval.',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (isLoading)
+            const Center(child: CircularProgressIndicator())
+          else if (loadError != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  loadError!,
+                  style: const TextStyle(color: AppColors.muted),
+                ),
+                TextButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try again'),
+                ),
+              ],
+            )
+          else if (spaces.isEmpty)
+            const Text(
+              'No societies are listed yet.',
+              style: TextStyle(color: AppColors.muted, fontSize: 13),
+            )
+          else
+            ...spaces.map((space) => _SocietyDirectoryCard(space: space)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SocietyDirectoryCard extends StatelessWidget {
+  const _SocietyDirectoryCard({required this.space});
+
+  final Map<String, dynamic> space;
+
+  @override
+  Widget build(BuildContext context) {
+    final spaceId = space['space_id'] as String? ?? '';
+    final displayName = space['display_name'] as String? ?? 'Society Space';
+    final description =
+        space['public_description'] as String? ??
+        'View public information about this Society Space.';
+
+    return Container(
+      key: Key('society-directory-card-$spaceId'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FBF9),
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SocietyMonogramLogo(
+                key: Key('society-logo-$spaceId'),
+                name: displayName,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Text(
+                      'Society Space · Public profile',
+                      style: TextStyle(color: AppColors.muted, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              key: Key('request-society-access-$spaceId'),
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text(displayName),
+                  content: const Text(
+                    'Access requests are not connected yet. Public discovery does not grant access to members, covered lives, fees, or committee records.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ),
+              icon: const Icon(Icons.lock_outline, size: 16),
+              label: const Text('Request access'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.forest,
+                foregroundColor: AppColors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(7),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SocietyMonogramLogo extends StatelessWidget {
+  const _SocietyMonogramLogo({super.key, required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .take(3)
+        .map((word) => word[0].toUpperCase())
+        .join();
+
+    return Container(
+      width: 54,
+      height: 54,
+      decoration: BoxDecoration(
+        color: AppColors.forest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -960,14 +1339,18 @@ class _OfferingCard extends StatelessWidget {
         const SizedBox(height: 6),
         const Divider(height: 1, color: AppColors.border),
         SizedBox(
-          height: 30,
-          child: TextButton(
+          height: 34,
+          child: FilledButton(
             key: actionKey,
             onPressed: onPressed,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.forest,
-              padding: EdgeInsets.zero,
-              alignment: Alignment.centerLeft,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.forest,
+              foregroundColor: AppColors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 9),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
               textStyle: const TextStyle(
                 fontSize: 9,
                 fontWeight: FontWeight.w700,

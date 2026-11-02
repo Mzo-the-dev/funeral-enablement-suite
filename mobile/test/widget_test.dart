@@ -36,6 +36,20 @@ class _FakeRegistrationApi extends RegistrationApi {
   ];
 
   @override
+  Future<List<Map<String, dynamic>>> listDiscoverableSpaces() async => [
+    {
+      'space_id': 'demo-space-id',
+      'display_name': 'Stronger Together Society',
+      'space_code': 'society',
+      'public_description': 'A synthetic demo Society Space.',
+    },
+  ];
+
+  @override
+  Future<List<Map<String, dynamic>>> listMySpaces(String sessionToken) async =>
+      [];
+
+  @override
   Future<Map<String, dynamic>> register(Map<String, Object?> payload) async => {
     'registrationId': '00000000-0000-4000-8000-000000000001',
     'status': 'pending_verification',
@@ -52,6 +66,22 @@ class _FakeRegistrationApi extends RegistrationApi {
     verifyCalled = true;
     return {'status': 'active', 'message': 'Contact verified.'};
   }
+}
+
+class _ActiveMembershipApi extends _FakeRegistrationApi {
+  const _ActiveMembershipApi();
+
+  @override
+  Future<List<Map<String, dynamic>>> listMySpaces(String sessionToken) async =>
+      [
+        {
+          'space_id': 'demo-space-id',
+          'display_name': 'Stronger Together Society',
+          'society_name': 'Stronger Together Society',
+          'space_code': 'society',
+          'role_code': 'member',
+        },
+      ];
 }
 
 void main() {
@@ -147,8 +177,20 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('space-offer-society')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('does not create membership'), findsOneWidget);
+    expect(find.text('Explore societies'), findsOneWidget);
+    expect(find.text('Stronger Together Society'), findsOneWidget);
+    expect(find.byKey(const Key('society-logo-demo-space-id')), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('request-society-access-demo-space-id')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Access requests are not connected yet'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('navigation-invitations')));
@@ -164,6 +206,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(_FakeRegistrationApi.logoutCalled, isTrue);
     expect(find.text('Welcome back'), findsOneWidget);
+  });
+
+  testWidgets('shows the linked society as an active Space', (tester) async {
+    tester.view.physicalSize = const Size(440, 956);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SpacesLandingScreen(
+          api: _ActiveMembershipApi(),
+          sessionToken: 'test-session-token',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 accessible'), findsOneWidget);
+    expect(find.byKey(const Key('active-space-demo-space-id')), findsOneWidget);
+    expect(find.text('Stronger Together Society'), findsOneWidget);
+    expect(find.text('Access enabled'), findsOneWidget);
+    expect(find.text('Open Stronger Together Society'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Explore other offerings'),
+      120,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('spaces-tab-content')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(find.byKey(const Key('offering-card-society')), findsNothing);
   });
 
   testWidgets('registration contains the requested account fields', (
