@@ -203,3 +203,20 @@ Expanded `Research and planning/Funeral Spaces - Society Space Product Requireme
 - Backend TypeScript build and typecheck pass; runtime dependency audit reports no vulnerabilities (development-tool advisories remain to review).
 - Flutter analyzer and widget tests pass, including registration and the API-backed verification screen using a fake server.
 - Local HTTP/database smoke test succeeded with synthetic data: health returned connected, registration persisted, and verification changed the account to active and contact to verified. The backend was stopped after this check.
+
+## Password login and Space-category landing
+
+### Implemented
+
+- Added `POST /api/sessions` for username or verified-email plus password login. It checks active account status, uses the stored Argon2id hash, records login events, applies a five-failure/15-minute credential lock, and creates a 12-hour opaque session token.
+- The database stores only the token's SHA-256 hash. Flutter keeps the returned token in memory, revokes it on sign-out, and does not persist it across app restarts.
+- Added `GET /api/spaces/types` and a signed-in Spaces hub with Spaces, Invitations, and Help tabs. The hub separates active membership from offerings and currently shows an honest empty-membership state because there are no membership records yet.
+- Category cards and the Shared Funeral Case offering follow the reviewed Spaces-and-offerings mockup. Access-request actions explain that join requests are not connected; they do not create membership or grant private access.
+- Added widget coverage for login navigation, category loading/selection, and sign-out. Backend build and Flutter widget tests pass.
+
+### Concepts learned and remaining boundaries
+
+- **Session token:** a random bearer secret used to associate app activity with a signed-in account. Store only a cryptographic hash on the server and keep the raw token out of the database and logs.
+- **Credential lockout:** failed-password counters and a temporary lock make repeated guessing harder; the current in-memory API throttle and per-account lock are development safeguards, not production abuse protection.
+- **Category versus Space:** a category describes a kind of organization. A real Space, its members, invitations, and join requests need separate records and authorization rules.
+- The current landing is a category chooser, not the previously planned directory. It does not browse real Spaces, submit join requests, or grant access. The current session is memory-only and has no refresh/rotation flow; password recovery and real OTP delivery also remain unimplemented.

@@ -44,6 +44,24 @@ class RegistrationApi {
     await _post('/sessions/logout', {'sessionToken': sessionToken});
   }
 
+  Future<Map<String, dynamic>> getMyProfile(String sessionToken) {
+    return _getMap(
+      '/users/me/profile',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> updateMyProfile({
+    required String sessionToken,
+    required Map<String, Object?> changes,
+  }) {
+    return _post(
+      '/users/me/profile',
+      changes,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
   Future<List<Map<String, dynamic>>> listSpaceTypes() {
     return _getList('/spaces/types');
   }

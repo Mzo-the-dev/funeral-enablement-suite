@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import 'access_flow.dart';
@@ -370,11 +374,42 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
   bool _isLoading = true;
   bool _isSigningOut = false;
   int _selectedTab = 0;
+  Map<String, dynamic> _profile = {};
 
   @override
   void initState() {
     super.initState();
     _loadSpaceTypes();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    try {
+      final profile = await widget.api.getMyProfile(widget.sessionToken);
+      if (mounted) setState(() => _profile = profile);
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showAccountMessage(error.message);
+    }
+  }
+
+  Future<void> _editProfile() async {
+    final updatedProfile = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _ProfileEditDialog(
+        api: widget.api,
+        sessionToken: widget.sessionToken,
+        profile: _profile,
+      ),
+    );
+    if (updatedProfile != null && mounted) {
+      setState(() => _profile = updatedProfile);
+    }
+  }
+
+  void _showAccountMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _loadSpaceTypes() async {
@@ -430,6 +465,8 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
           children: [
             _SpacesBrandHeader(
               isSigningOut: _isSigningOut,
+              avatarBytes: _decodeAvatar(_profile),
+              onEditProfile: _editProfile,
               onSignOut: _signOut,
             ),
             _SpacesNavigation(
@@ -898,8 +935,10 @@ class SocietySpaceScreen extends StatefulWidget {
 class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
   int _selectedTab = 0;
   Map<String, dynamic> _dashboard = {};
+  Map<String, dynamic> _profile = {};
   String? _loadError;
   bool _isLoading = true;
+  bool _isSigningOut = false;
   String _memberSearch = '';
   String _memberStatusFilter = 'all';
 
@@ -964,6 +1003,30 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
   void initState() {
     super.initState();
     _loadDashboard();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    try {
+      final profile = await widget.api.getMyProfile(widget.sessionToken);
+      if (mounted) setState(() => _profile = profile);
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _editProfile() async {
+    final updatedProfile = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _ProfileEditDialog(
+        api: widget.api,
+        sessionToken: widget.sessionToken,
+        profile: _profile,
+      ),
+    );
+    if (updatedProfile != null && mounted) {
+      setState(() => _profile = updatedProfile);
+    }
   }
 
   Future<void> _loadDashboard() async {
@@ -1097,6 +1160,22 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _signOut() async {
+    if (_isSigningOut) return;
+    setState(() => _isSigningOut = true);
+    try {
+      await widget.api.logout(widget.sessionToken);
+    } on RegistrationApiException {
+      if (!mounted) return;
+      _showWorkspaceMessage('Could not confirm sign-out with the server.');
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => LoginScreen(api: widget.api)),
+      (_) => false,
+    );
+  }
+
   Future<void> _approveCase(String caseId) async {
     try {
       await widget.api.approveFuneralCase(
@@ -1181,19 +1260,12 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: Center(
-              child: CircleAvatar(
-                radius: 19,
-                backgroundColor: AppColors.white,
-                foregroundColor: AppColors.forest,
-                child: Text(
-                  _initials(
-                    '${_currentMember['given_name'] ?? ''} ${_currentMember['surname'] ?? ''}',
-                  ),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              child: _AccountMenuButton(
+                key: const Key('society-account-button'),
+                isSigningOut: _isSigningOut,
+                avatarBytes: _decodeAvatar(_profile),
+                onEditProfile: _editProfile,
+                onSignOut: _signOut,
               ),
             ),
           ),
@@ -1313,7 +1385,10 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
     final pendingCases = _summary['pending_cases'] as int? ?? 0;
     final approvedCases = _summary['approved_cases'] as int? ?? 0;
     final arrearsCount = _summary['members_in_arrears'] as int? ?? 0;
-    final memberName = _currentMember['given_name'] as String? ?? 'member';
+    final preferredName = (_profile['preferred_name'] as String?)?.trim();
+    final memberName = preferredName == null || preferredName.isEmpty
+        ? _currentMember['given_name'] as String? ?? 'member'
+        : preferredName;
     final now = DateTime.now();
     final totalDue = _toDouble(_summary['total_due']);
     final totalCollected = _toDouble(_summary['total_collected']);
@@ -2294,13 +2369,27 @@ class _SocietyMonogramLogo extends StatelessWidget {
   }
 }
 
+Uint8List? _decodeAvatar(Map<String, dynamic> profile) {
+  final encoded = profile['avatar_base64'];
+  if (encoded is! String || encoded.isEmpty) return null;
+  try {
+    return base64Decode(encoded);
+  } on FormatException {
+    return null;
+  }
+}
+
 class _SpacesBrandHeader extends StatelessWidget {
   const _SpacesBrandHeader({
     required this.isSigningOut,
+    required this.avatarBytes,
+    required this.onEditProfile,
     required this.onSignOut,
   });
 
   final bool isSigningOut;
+  final Uint8List? avatarBytes;
+  final VoidCallback onEditProfile;
   final VoidCallback onSignOut;
 
   @override
@@ -2332,42 +2421,283 @@ class _SpacesBrandHeader extends StatelessWidget {
               ],
             ),
           ),
-          PopupMenuButton<String>(
+          _AccountMenuButton(
             key: const Key('sign-out-button'),
-            tooltip: 'Account options',
-            onSelected: (value) {
-              if (value == 'sign-out') onSignOut();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
-            ],
-            child: SizedBox.square(
-              dimension: 34,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Center(
-                  child: isSigningOut
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(
-                          Icons.person_outline,
-                          size: 17,
-                          color: AppColors.forest,
-                        ),
-                ),
-              ),
-            ),
+            isSigningOut: isSigningOut,
+            avatarBytes: avatarBytes,
+            onEditProfile: onEditProfile,
+            onSignOut: onSignOut,
           ),
         ],
       ),
     ),
   );
+}
+
+class _AccountMenuButton extends StatelessWidget {
+  const _AccountMenuButton({
+    super.key,
+    required this.isSigningOut,
+    required this.avatarBytes,
+    required this.onEditProfile,
+    required this.onSignOut,
+  });
+
+  final bool isSigningOut;
+  final Uint8List? avatarBytes;
+  final VoidCallback onEditProfile;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+    tooltip: 'Account options',
+    onSelected: (value) {
+      if (value == 'edit-profile') onEditProfile();
+      if (value == 'sign-out') onSignOut();
+    },
+    itemBuilder: (context) => const [
+      PopupMenuItem(
+        value: 'edit-profile',
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.person_outline),
+          title: Text('Edit profile'),
+        ),
+      ),
+      PopupMenuItem(
+        value: 'sign-out',
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.logout),
+          title: Text('Sign out'),
+        ),
+      ),
+    ],
+    child: SizedBox.square(
+      dimension: 34,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.border),
+        ),
+        child: ClipOval(
+          child: Center(
+            child: isSigningOut
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : avatarBytes == null
+                ? const Icon(
+                    Icons.person_outline,
+                    size: 17,
+                    color: AppColors.forest,
+                  )
+                : Image.memory(
+                    avatarBytes!,
+                    width: 34,
+                    height: 34,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.person_outline,
+                      size: 17,
+                      color: AppColors.forest,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _ProfileEditDialog extends StatefulWidget {
+  const _ProfileEditDialog({
+    required this.api,
+    required this.sessionToken,
+    required this.profile,
+  });
+
+  final RegistrationApi api;
+  final String sessionToken;
+  final Map<String, dynamic> profile;
+
+  @override
+  State<_ProfileEditDialog> createState() => _ProfileEditDialogState();
+}
+
+class _ProfileEditDialogState extends State<_ProfileEditDialog> {
+  late final TextEditingController _preferredNameController;
+  Uint8List? _selectedImageBytes;
+  String? _selectedImageMimeType;
+  bool _clearAvatar = false;
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _preferredNameController = TextEditingController(
+      text: widget.profile['preferred_name'] as String? ??
+          widget.profile['given_name'] as String? ??
+          '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _preferredNameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chooseImage() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Profile images',
+          extensions: ['png', 'jpg', 'jpeg', 'webp'],
+        ),
+      ],
+    );
+    if (file == null || !mounted) return;
+    final extension = file.name.split('.').last.toLowerCase();
+    final mimeType = switch (extension) {
+      'png' => 'image/png',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      _ => null,
+    };
+    if (mimeType == null) {
+      setState(() => _errorMessage = 'Choose a PNG, JPEG, or WebP image.');
+      return;
+    }
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    if (bytes.length > 512 * 1024) {
+      setState(() => _errorMessage = 'Profile images must be 512 KB or smaller.');
+      return;
+    }
+    setState(() {
+      _selectedImageBytes = bytes;
+      _selectedImageMimeType = mimeType;
+      _clearAvatar = false;
+      _errorMessage = null;
+    });
+  }
+
+  Future<void> _save() async {
+    final preferredName = _preferredNameController.text.trim();
+    if (preferredName.isEmpty) {
+      setState(() => _errorMessage = 'Enter a preferred name.');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+    final changes = <String, Object?>{'preferredName': preferredName};
+    if (_selectedImageBytes != null) {
+      changes['avatarBase64'] = base64Encode(_selectedImageBytes!);
+      changes['avatarMimeType'] = _selectedImageMimeType;
+    } else if (_clearAvatar) {
+      changes['clearAvatar'] = true;
+    }
+    try {
+      final profile = await widget.api.updateMyProfile(
+        sessionToken: widget.sessionToken,
+        changes: changes,
+      );
+      if (mounted) Navigator.of(context).pop(profile);
+    } on RegistrationApiException catch (error) {
+      if (mounted) setState(() => _errorMessage = error.message);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avatarBytes = _selectedImageBytes ??
+        (_clearAvatar ? null : _decodeAvatar(widget.profile));
+    return AlertDialog(
+      title: const Text('Edit profile'),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 340,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 34,
+                backgroundColor: const Color(0xFFEAF1EC),
+                foregroundColor: AppColors.forest,
+                backgroundImage: avatarBytes == null
+                    ? null
+                    : MemoryImage(avatarBytes),
+                child: avatarBytes == null
+                    ? const Icon(Icons.person_outline, size: 30)
+                    : null,
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                key: const Key('choose-profile-image'),
+                onPressed: _isSaving ? null : _chooseImage,
+                icon: const Icon(Icons.image_outlined),
+                label: const Text('Choose profile image'),
+              ),
+              if (avatarBytes != null)
+                TextButton(
+                  onPressed: _isSaving
+                      ? null
+                      : () => setState(() {
+                          _selectedImageBytes = null;
+                          _selectedImageMimeType = null;
+                          _clearAvatar = true;
+                        }),
+                  child: const Text('Remove image'),
+                ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const Key('preferred-name-field'),
+                controller: _preferredNameController,
+                maxLength: 120,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Preferred name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (_errorMessage != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('save-profile-button'),
+          onPressed: _isSaving ? null : _save,
+          child: _isSaving
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 class _SpacesNavigation extends StatelessWidget {

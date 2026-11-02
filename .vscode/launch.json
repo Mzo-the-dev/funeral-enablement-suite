@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "EverBond Web (port 5322)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/mobile/lib/main.dart",
+      "deviceId": "chrome",
+      "toolArgs": ["--web-port", "5322"]
+    }
+  ]
+}

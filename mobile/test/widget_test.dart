@@ -10,6 +10,8 @@ class _FakeRegistrationApi extends RegistrationApi {
   static bool verifyCalled = false;
   static bool loginCalled = false;
   static bool logoutCalled = false;
+  static bool profileUpdateCalled = false;
+  static String preferredName = 'Amahle';
   static String? loginIdentity;
 
   @override
@@ -25,6 +27,29 @@ class _FakeRegistrationApi extends RegistrationApi {
   @override
   Future<void> logout(String sessionToken) async {
     logoutCalled = true;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getMyProfile(String sessionToken) async => {
+    'given_name': 'Amahle',
+    'preferred_name': preferredName,
+    'avatar_base64': null,
+    'avatar_mime_type': null,
+  };
+
+  @override
+  Future<Map<String, dynamic>> updateMyProfile({
+    required String sessionToken,
+    required Map<String, Object?> changes,
+  }) async {
+    profileUpdateCalled = true;
+    preferredName = changes['preferredName'] as String? ?? preferredName;
+    return {
+      'given_name': 'Amahle',
+      'preferred_name': preferredName,
+      'avatar_base64': null,
+      'avatar_mime_type': null,
+    };
   }
 
   @override
@@ -349,6 +374,8 @@ void main() {
   });
 
   testWidgets('shows the linked society as an active Space', (tester) async {
+    _FakeRegistrationApi.profileUpdateCalled = false;
+    _FakeRegistrationApi.preferredName = 'Amahle';
     tester.view.physicalSize = const Size(440, 956);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -363,6 +390,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('sign-out-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit profile'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('preferred-name-field')),
+      'Amahle Preferred',
+    );
+    await tester.tap(find.byKey(const Key('save-profile-button')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.profileUpdateCalled, isTrue);
 
     expect(find.text('1 accessible'), findsOneWidget);
     expect(find.byKey(const Key('active-space-demo-space-id')), findsOneWidget);
@@ -396,7 +435,14 @@ void main() {
         findsOneWidget,
       );
     }
-    expect(find.textContaining(', Amahle'), findsOneWidget);
+    expect(find.textContaining(', Amahle Preferred'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('society-account-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit profile'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preferred-name-field')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
     expect(find.text('At a glance'), findsOneWidget);
     expect(find.text('October 2026 contributions'), findsOneWidget);
 
