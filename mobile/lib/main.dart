@@ -507,6 +507,25 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
           'Care, coordination and support. Find the right space for your role.',
           style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
         ),
+        if (_profile['is_platform_admin'] == true) ...[
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('platform-admin-tools'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlatformAdminRepairScreen(
+                    api: widget.api,
+                    sessionToken: widget.sessionToken,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
+              label: const Text('Platform data repair'),
+            ),
+          ),
+        ],
         const SizedBox(height: 17),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -916,6 +935,260 @@ class _SpacesLandingScreenState extends State<SpacesLandingScreen> {
   }
 }
 
+class PlatformAdminRepairScreen extends StatefulWidget {
+  const PlatformAdminRepairScreen({
+    super.key,
+    required this.api,
+    required this.sessionToken,
+  });
+
+  final RegistrationApi api;
+  final String sessionToken;
+
+  @override
+  State<PlatformAdminRepairScreen> createState() =>
+      _PlatformAdminRepairScreenState();
+}
+
+class _PlatformAdminRepairScreenState extends State<PlatformAdminRepairScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _identityController = TextEditingController();
+  final _societyCodeController = TextEditingController();
+  final _memberNumberController = TextEditingController();
+  final _reasonController = TextEditingController();
+  Map<String, dynamic>? _preview;
+  bool _isBusy = false;
+
+  @override
+  void dispose() {
+    _identityController.dispose();
+    _societyCodeController.dispose();
+    _memberNumberController.dispose();
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reviewLink() async {
+    if (_isBusy || !(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _isBusy = true);
+    try {
+      final preview = await widget.api.previewPlatformAdminMemberLink(
+        sessionToken: widget.sessionToken,
+        identity: _identityController.text.trim(),
+        societyCode: _societyCodeController.text.trim(),
+        memberNumber: _memberNumberController.text.trim(),
+      );
+      if (mounted) setState(() => _preview = preview);
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showAdminMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  Future<void> _confirmLink() async {
+    final preview = _preview;
+    if (preview == null || _isBusy) return;
+    final account = _platformAdminMap(preview['account']);
+    final member = _platformAdminMap(preview['member']);
+    final society = _platformAdminMap(preview['society']);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm account link'),
+        content: Text(
+          'Link ${account['given_name']} ${account['surname']} to '
+          '${member['member_number']} (${member['given_name']} ${member['surname']}) '
+          'in ${society['name']} and activate its Society Space access?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-member-account-link'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirm link'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isBusy = true);
+    try {
+      await widget.api.repairPlatformAdminMemberLink(
+        sessionToken: widget.sessionToken,
+        identity: _identityController.text.trim(),
+        societyCode: _societyCodeController.text.trim(),
+        memberNumber: _memberNumberController.text.trim(),
+        reason: _reasonController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => _preview = null);
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Account link repaired'),
+          content: const Text(
+            'The existing account is linked to the Society member and its active Society Space.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showAdminMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  void _showAdminMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final account = _preview == null
+        ? <String, dynamic>{}
+        : _platformAdminMap(_preview!['account']);
+    final member = _preview == null
+        ? <String, dynamic>{}
+        : _platformAdminMap(_preview!['member']);
+    final society = _preview == null
+        ? <String, dynamic>{}
+        : _platformAdminMap(_preview!['society']);
+    final space = _preview == null
+        ? <String, dynamic>{}
+        : _platformAdminMap(_preview!['space']);
+    final alreadyLinked = _preview?['already_linked'] == true;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Platform data repair')),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              const Text(
+                'Link an existing account to an existing Society member.',
+                style: TextStyle(color: AppColors.muted, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                key: const Key('admin-account-identity'),
+                controller: _identityController,
+                decoration: const InputDecoration(
+                  labelText: 'Username or verified email',
+                ),
+                onChanged: (_) => setState(() => _preview = null),
+                validator: (value) => value == null || value.trim().length < 3
+                    ? 'Enter a username or verified email.'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('admin-society-code'),
+                controller: _societyCodeController,
+                decoration: const InputDecoration(labelText: 'Society code'),
+                onChanged: (_) => setState(() => _preview = null),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a Society code.'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('admin-member-number'),
+                controller: _memberNumberController,
+                decoration: const InputDecoration(
+                  labelText: 'Society member number',
+                ),
+                onChanged: (_) => setState(() => _preview = null),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a member number.'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('admin-repair-reason'),
+                controller: _reasonController,
+                maxLength: 500,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Reason for repair',
+                ),
+                validator: (value) => value == null || value.trim().length < 10
+                    ? 'Enter a reason of at least 10 characters.'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('review-member-account-link'),
+                onPressed: _isBusy ? null : _reviewLink,
+                icon: const Icon(Icons.fact_check_outlined, size: 18),
+                label: Text(_isBusy ? 'Checking…' : 'Review link'),
+              ),
+              if (_preview != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Account',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      Text('${account['given_name']} ${account['surname']}'),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Society member',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        '${member['member_number']} · ${member['given_name']} ${member['surname']}',
+                      ),
+                      Text('${society['name']} · ${space['display_name']}'),
+                      const SizedBox(height: 10),
+                      Text(
+                        alreadyLinked
+                            ? 'This account and member are already linked.'
+                            : 'Confirm only if these are the intended records.',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  key: const Key('submit-member-account-link'),
+                  onPressed: _isBusy || alreadyLinked ? null : _confirmLink,
+                  icon: const Icon(Icons.link, size: 18),
+                  label: const Text('Confirm and link'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Map<String, dynamic> _platformAdminMap(dynamic value) =>
+    value is Map ? value.cast<String, dynamic>() : <String, dynamic>{};
+
 class SocietySpaceScreen extends StatefulWidget {
   const SocietySpaceScreen({
     super.key,
@@ -940,7 +1213,12 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
   bool _isLoading = true;
   bool _isSigningOut = false;
   String _memberSearch = '';
-  String _memberStatusFilter = 'all';
+  String _memberView = 'society-members';
+  List<Map<String, dynamic>> _societyMembers = [];
+  Map<String, dynamic> _myCoveredLifeData = {};
+  bool _isLoadingMemberView = true;
+  String? _memberViewError;
+  int _memberViewRequest = 0;
 
   String get _spaceId => widget.space['space_id'] as String? ?? '';
 
@@ -948,7 +1226,8 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
       _asMap(_dashboard['current_member']);
   Map<String, dynamic> get _permissions => _asMap(_dashboard['permissions']);
   Map<String, dynamic> get _summary => _asMap(_dashboard['summary']);
-  List<Map<String, dynamic>> get _members => _asMaps(_dashboard['members']);
+  List<Map<String, dynamic>> get _recentActivity =>
+      _asMaps(_dashboard['recent_activity']);
   List<Map<String, dynamic>> get _contributions =>
       _asMaps(_dashboard['my_contributions']);
   List<Map<String, dynamic>> get _cases => _asMaps(_dashboard['funeral_cases']);
@@ -1004,6 +1283,7 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
     super.initState();
     _loadDashboard();
     _loadProfile();
+    _loadMemberView();
   }
 
   Future<void> _loadProfile() async {
@@ -1047,6 +1327,51 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
     }
   }
 
+  Future<void> _selectMemberView(String view) async {
+    if (view == _memberView) return;
+    setState(() {
+      _memberView = view;
+      _memberSearch = '';
+    });
+    await _loadMemberView();
+  }
+
+  Future<void> _loadMemberView() async {
+    final request = ++_memberViewRequest;
+    final view = _memberView;
+    setState(() {
+      _isLoadingMemberView = true;
+      _memberViewError = null;
+    });
+    try {
+      if (view == 'covered-lives') {
+        final data = await widget.api.getMyCoveredLives(
+          spaceId: _spaceId,
+          sessionToken: widget.sessionToken,
+        );
+        if (mounted && request == _memberViewRequest) {
+          setState(() => _myCoveredLifeData = data);
+        }
+      } else {
+        final members = await widget.api.listActiveSocietyMembers(
+          spaceId: _spaceId,
+          sessionToken: widget.sessionToken,
+        );
+        if (mounted && request == _memberViewRequest) {
+          setState(() => _societyMembers = members);
+        }
+      }
+    } on RegistrationApiException catch (error) {
+      if (mounted && request == _memberViewRequest) {
+        setState(() => _memberViewError = error.message);
+      }
+    } finally {
+      if (mounted && request == _memberViewRequest) {
+        setState(() => _isLoadingMemberView = false);
+      }
+    }
+  }
+
   String _money(dynamic amount) {
     final value = amount is num ? amount : num.tryParse('$amount') ?? 0;
     return 'R${value.toStringAsFixed(2)}';
@@ -1057,6 +1382,36 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
     return date == null
         ? 'Latest period'
         : MaterialLocalizations.of(context).formatMonthYear(date);
+  }
+
+  String _activityTitle(Map<String, dynamic> activity) {
+    final eventCount = activity['event_count'] as int? ?? 1;
+    return switch (activity['activity_type']) {
+      'contributions_received' => '${_money(activity['amount'])} received',
+      'funeral_cases_reported' =>
+        '$eventCount funeral ${eventCount == 1 ? 'case' : 'cases'} reported',
+      'funeral_cases_approved' =>
+        '$eventCount funeral ${eventCount == 1 ? 'case' : 'cases'} approved',
+      'member_created' => 'Member added',
+      'member_updated' => 'Member details updated',
+      'member_deactivated' => 'Member deactivated',
+      'covered_life_added' => 'Covered life added',
+      'covered_life_updated' => 'Covered life details updated',
+      'covered_life_deactivated' => 'Covered life deactivated',
+      _ => 'Society activity',
+    };
+  }
+
+  String _activitySubtitle(Map<String, dynamic> activity) {
+    final date = DateTime.tryParse('${activity['occurred_at'] ?? ''}');
+    final dateLabel = date == null
+        ? 'Recently'
+        : MaterialLocalizations.of(context).formatMediumDate(date);
+    if (activity['activity_type'] == 'contributions_received') {
+      final eventCount = activity['event_count'] as int? ?? 1;
+      return '$eventCount ${eventCount == 1 ? 'payment' : 'payments'} · $dateLabel';
+    }
+    return dateLabel;
   }
 
   Widget _pageHeading(String title, String subtitle) => Column(
@@ -1184,6 +1539,58 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
         sessionToken: widget.sessionToken,
       );
       if (mounted) await _loadDashboard();
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _completeCasePayout(String caseId) async {
+    try {
+      await widget.api.completeFuneralCasePayout(
+        spaceId: _spaceId,
+        caseId: caseId,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) await _loadDashboard();
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _registerFuneralCase() async {
+    final existingDetails = _asMap(_dashboard['existing_payout_details']);
+    final registration = await showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (_) => _FuneralRegistrationDialog(
+        existingBankDetails: existingDetails.isEmpty ? null : existingDetails,
+      ),
+    );
+    if (registration == null || !mounted) return;
+    try {
+      await widget.api.registerFuneralCase(
+        spaceId: _spaceId,
+        sessionToken: widget.sessionToken,
+        registration: registration,
+      );
+      if (!mounted) return;
+      await _loadDashboard();
+      await _loadMemberView();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Funeral registered'),
+          content: const Text(
+            'The funeral was successfully registered and is pending approval.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
     } on RegistrationApiException catch (error) {
       if (mounted) _showWorkspaceMessage(error.message);
     }
@@ -1381,6 +1788,509 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
     );
   }
 
+  Future<void> _openMemberDetails(Map<String, dynamic> member) async {
+    final memberId = member['member_id'] as String?;
+    if (memberId == null) return;
+    try {
+      final details = await widget.api.getSocietyMember(
+        spaceId: _spaceId,
+        memberId: memberId,
+        sessionToken: widget.sessionToken,
+      );
+      if (!mounted) return;
+      final coveredLives = _asMaps(details['covered_lives']);
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('${details['given_name']} ${details['surname']}'),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Member number: ${details['member_number']}'),
+                  Text('Joined: ${details['joined_at']}'),
+                  Text('Status: ${_formatRole('${details['status']}')}'),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Covered lives',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  if (coveredLives.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No covered lives recorded.'),
+                    ),
+                  for (final life in coveredLives)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(life['display_name'] as String? ?? ''),
+                      subtitle: Text(
+                        '${_formatRole('${life['relationship_code']}')} · ${life['effective_from']}${life['effective_to'] == null ? '' : ' to ${life['effective_to']}'} · ${life['status']}',
+                      ),
+                      trailing: _canManageMembers && life['status'] == 'active'
+                          ? Wrap(
+                              children: [
+                                IconButton(
+                                  tooltip: 'Edit covered life',
+                                  icon: const Icon(Icons.edit_outlined),
+                                  onPressed: () {
+                                    Navigator.of(dialogContext).pop();
+                                    _editCoveredLife(member, life);
+                                  },
+                                ),
+                                IconButton(
+                                  tooltip: 'Deactivate covered life',
+                                  icon: const Icon(Icons.person_off_outlined),
+                                  onPressed: () {
+                                    Navigator.of(dialogContext).pop();
+                                    _deactivateCoveredLife(member, life);
+                                  },
+                                ),
+                              ],
+                            )
+                          : null,
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            if (_canManageMembers) ...[
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  _editMember(details);
+                },
+                child: const Text('Edit member'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  _editCoveredLife(details, null);
+                },
+                child: const Text('Add covered life'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  _showMemberHistory(memberId);
+                },
+                child: const Text('Change history'),
+              ),
+              if (details['status'] == 'active')
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    _deactivateMember(details);
+                  },
+                  child: const Text('Deactivate member'),
+                ),
+            ],
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  bool get _canManageMembers => _permissions['can_manage_members'] == true;
+
+  Future<Map<String, Object?>?> _memberForm({Map<String, dynamic>? member}) {
+    var number = member?['member_number'] as String? ?? '';
+    var givenName = member?['given_name'] as String? ?? '';
+    var surname = member?['surname'] as String? ?? '';
+    var joinedAt =
+        member?['joined_at'] as String? ??
+        DateTime.now().toIso8601String().substring(0, 10);
+    return showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(member == null ? 'Add member' : 'Edit member'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('member-number-field'),
+                initialValue: number,
+                onChanged: (value) => number = value,
+                decoration: const InputDecoration(labelText: 'Member number'),
+              ),
+              TextFormField(
+                key: const Key('member-given-name-field'),
+                initialValue: givenName,
+                onChanged: (value) => givenName = value,
+                decoration: const InputDecoration(labelText: 'First name'),
+              ),
+              TextFormField(
+                key: const Key('member-surname-field'),
+                initialValue: surname,
+                onChanged: (value) => surname = value,
+                decoration: const InputDecoration(labelText: 'Surname'),
+              ),
+              TextFormField(
+                key: const Key('member-joined-date-field'),
+                initialValue: joinedAt,
+                onChanged: (value) => joinedAt = value,
+                decoration: const InputDecoration(
+                  labelText: 'Joined date (YYYY-MM-DD)',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('save-society-member'),
+            onPressed: () => Navigator.of(dialogContext).pop({
+              'memberNumber': number.trim(),
+              'givenName': givenName.trim(),
+              'surname': surname.trim(),
+              'joinedAt': joinedAt.trim(),
+            }),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editMember([Map<String, dynamic>? member]) async {
+    final changes = await _memberForm(member: member);
+    if (changes == null) return;
+    try {
+      if (member == null) {
+        await widget.api.createSocietyMember(
+          spaceId: _spaceId,
+          sessionToken: widget.sessionToken,
+          member: changes,
+        );
+      } else {
+        await widget.api.updateSocietyMember(
+          spaceId: _spaceId,
+          memberId: member['member_id'] as String,
+          sessionToken: widget.sessionToken,
+          changes: changes,
+        );
+      }
+      if (mounted) {
+        await _loadDashboard();
+        await _loadMemberView();
+      }
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<Map<String, Object?>?> _coveredLifeForm({
+    Map<String, dynamic>? coveredLife,
+  }) async {
+    final personNumber = TextEditingController(
+      text: '${coveredLife?['person_number'] ?? ''}',
+    );
+    final name = TextEditingController(
+      text: coveredLife?['display_name'] as String? ?? '',
+    );
+    final identityNumber = TextEditingController(
+      text: coveredLife?['identity_number'] as String? ?? '',
+    );
+    final effectiveFrom = TextEditingController(
+      text:
+          coveredLife?['effective_from'] as String? ??
+          DateTime.now().toIso8601String().substring(0, 10),
+    );
+    final effectiveTo = TextEditingController(
+      text: coveredLife?['effective_to'] as String? ?? '',
+    );
+    var relationship =
+        coveredLife?['relationship_code'] as String? ?? 'dependent';
+    try {
+      return await showDialog<Map<String, Object?>>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text(
+              coveredLife == null ? 'Add covered life' : 'Edit covered life',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (coveredLife == null)
+                    TextField(
+                      controller: personNumber,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Person number',
+                      ),
+                    ),
+                  TextField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'Full name'),
+                  ),
+                  TextField(
+                    controller: identityNumber,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'ID number (optional)',
+                    ),
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: relationship,
+                    decoration: const InputDecoration(
+                      labelText: 'Relationship',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'member', child: Text('Member')),
+                      DropdownMenuItem(value: 'spouse', child: Text('Spouse')),
+                      DropdownMenuItem(
+                        value: 'dependent',
+                        child: Text('Dependent'),
+                      ),
+                    ],
+                    onChanged: (value) => setDialogState(
+                      () => relationship = value ?? 'dependent',
+                    ),
+                  ),
+                  TextField(
+                    controller: effectiveFrom,
+                    decoration: const InputDecoration(
+                      labelText: 'Effective from (YYYY-MM-DD)',
+                    ),
+                  ),
+                  TextField(
+                    controller: effectiveTo,
+                    decoration: const InputDecoration(
+                      labelText: 'Effective to (optional)',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const Key('save-covered-life'),
+                onPressed: () => Navigator.of(dialogContext).pop({
+                  if (coveredLife == null)
+                    'personNumber': int.tryParse(personNumber.text),
+                  'displayName': name.text.trim(),
+                  'identityNumber': identityNumber.text.trim().isEmpty
+                      ? null
+                      : identityNumber.text.trim(),
+                  'relationshipCode': relationship,
+                  'effectiveFrom': effectiveFrom.text.trim(),
+                  'effectiveTo': effectiveTo.text.trim().isEmpty
+                      ? null
+                      : effectiveTo.text.trim(),
+                }),
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      personNumber.dispose();
+      name.dispose();
+      identityNumber.dispose();
+      effectiveFrom.dispose();
+      effectiveTo.dispose();
+    }
+  }
+
+  Future<void> _editCoveredLife(
+    Map<String, dynamic> member,
+    Map<String, dynamic>? coveredLife,
+  ) async {
+    final values = await _coveredLifeForm(coveredLife: coveredLife);
+    if (values == null) return;
+    try {
+      final memberId = member['member_id'] as String;
+      if (coveredLife == null) {
+        await widget.api.createCoveredLife(
+          spaceId: _spaceId,
+          memberId: memberId,
+          sessionToken: widget.sessionToken,
+          coveredLife: values,
+        );
+      } else {
+        await widget.api.updateCoveredLife(
+          spaceId: _spaceId,
+          memberId: memberId,
+          coveredLifeId: coveredLife['covered_life_id'] as String,
+          sessionToken: widget.sessionToken,
+          changes: values,
+        );
+      }
+      if (mounted) {
+        await _loadDashboard();
+        await _loadMemberView();
+      }
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _addOwnCoveredLife() async {
+    final values = await _ownCoveredLifeForm();
+    if (values == null) return;
+    try {
+      await widget.api.createMyCoveredLife(
+        spaceId: _spaceId,
+        sessionToken: widget.sessionToken,
+        coveredLife: values,
+      );
+      if (!mounted) return;
+      await _loadMemberView();
+      if (mounted) _showWorkspaceMessage('Covered life added.');
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<Map<String, Object?>?> _ownCoveredLifeForm() =>
+      showDialog<Map<String, Object?>>(
+        context: context,
+        builder: (_) => const _OwnCoveredLifeDialog(),
+      );
+
+  Future<void> _deactivateMember(Map<String, dynamic> member) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Deactivate member?'),
+        content: const Text(
+          'This also ends active covered lives, office assignments, and linked Space access.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.api.deactivateSocietyMember(
+        spaceId: _spaceId,
+        memberId: member['member_id'] as String,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) {
+        await _loadDashboard();
+        await _loadMemberView();
+      }
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _deactivateCoveredLife(
+    Map<String, dynamic> member,
+    Map<String, dynamic> coveredLife,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Deactivate covered life?'),
+        content: Text(
+          'Remove ${coveredLife['display_name'] ?? 'this person'} from active cover?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.api.deactivateCoveredLife(
+        spaceId: _spaceId,
+        memberId: member['member_id'] as String,
+        coveredLifeId: coveredLife['covered_life_id'] as String,
+        sessionToken: widget.sessionToken,
+      );
+      if (mounted) {
+        await _loadDashboard();
+        await _loadMemberView();
+      }
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
+  Future<void> _showMemberHistory(String memberId) async {
+    try {
+      final history = await widget.api.getSocietyMemberHistory(
+        spaceId: _spaceId,
+        memberId: memberId,
+        sessionToken: widget.sessionToken,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Change history'),
+          content: SizedBox(
+            width: 360,
+            child: history.isEmpty
+                ? const Text('No changes recorded yet.')
+                : ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final entry in history)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            '${entry['action']}'.replaceAll('_', ' '),
+                          ),
+                          subtitle: Text(
+                            '${entry['occurred_at']} · ${entry['actor_user_id']}',
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } on RegistrationApiException catch (error) {
+      if (mounted) _showWorkspaceMessage(error.message);
+    }
+  }
+
   Widget _buildHomeTab() {
     final pendingCases = _summary['pending_cases'] as int? ?? 0;
     final approvedCases = _summary['approved_cases'] as int? ?? 0;
@@ -1483,9 +2393,9 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
+                    Wrap(
+                      spacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           _money(_summary['total_collected']),
@@ -1551,37 +2461,51 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
           ),
         ),
         const SizedBox(height: 18),
-        const Text(
-          'Needs attention',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Needs attention',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (pendingCases + arrearsCount > 0)
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFE2B14B),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${pendingCases + arrearsCount}',
+                  style: const TextStyle(
+                    color: Color(0xFF4A3511),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
         ),
         if (pendingCases > 0)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(
-              Icons.assignment_outlined,
-              color: AppColors.forest,
-            ),
-            title: Text(
-              '$pendingCases funeral cases awaiting review',
-              style: const TextStyle(fontSize: 11),
-            ),
-            trailing: const Icon(Icons.chevron_right, size: 18),
+          _homeAttentionItem(
+            icon: Icons.assignment_outlined,
+            title: '$pendingCases funeral cases awaiting review',
+            detail: _permissions['can_view_cases'] == true
+                ? 'Review pending cases in your officer queue.'
+                : 'Track the cases you have reported and their status.',
+            action: 'Open funeral cases →',
             onTap: () => setState(() => _selectedTab = 3),
           ),
         if (arrearsCount > 0)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(
-              Icons.payments_outlined,
-              color: AppColors.forest,
-            ),
-            title: Text(
-              '$arrearsCount members in arrears',
-              style: const TextStyle(fontSize: 11),
-            ),
-            trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => setState(() => _selectedTab = 1),
+          _homeAttentionItem(
+            icon: Icons.swap_horiz_rounded,
+            title: 'Match $arrearsCount member contribution balances',
+            detail: 'Outstanding Society contributions need follow-up.',
+            action: 'View contributions →',
+            onTap: () => setState(() => _selectedTab = 2),
           ),
         if (pendingCases == 0 && arrearsCount == 0)
           const Padding(
@@ -1589,6 +2513,53 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
             child: Text(
               'No items need attention right now.',
               style: TextStyle(color: AppColors.muted, fontSize: 11),
+            ),
+          ),
+        const SizedBox(height: 12),
+        const Text(
+          'Recent activity',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        if (_recentActivity.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              'No recent activity has been recorded yet.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            ),
+          )
+        else
+          ..._recentActivity.map(
+            (activity) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE2B14B),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(
+                  activity['activity_type'] == 'contributions_received'
+                      ? Icons.payments_outlined
+                      : activity['activity_type'].toString().startsWith(
+                          'funeral_cases_',
+                        )
+                      ? Icons.assignment_outlined
+                      : Icons.groups_outlined,
+                  color: const Color(0xFF81530D),
+                  size: 19,
+                ),
+              ),
+              title: Text(
+                _activityTitle(activity),
+                style: const TextStyle(fontSize: 11),
+              ),
+              subtitle: Text(
+                _activitySubtitle(activity),
+                style: const TextStyle(color: AppColors.muted, fontSize: 9),
+              ),
             ),
           ),
       ],
@@ -1617,6 +2588,62 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
         Text(
           detail,
           style: const TextStyle(color: AppColors.muted, fontSize: 9),
+        ),
+      ],
+    ),
+  );
+
+  Widget _homeAttentionItem({
+    required IconData icon,
+    required String title,
+    required String detail,
+    required String? action,
+    required VoidCallback? onTap,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE2B14B),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Icon(icon, color: const Color(0xFF81530D), size: 19),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                detail,
+                style: const TextStyle(color: AppColors.muted, fontSize: 9),
+              ),
+              if (action != null && onTap != null)
+                TextButton(
+                  onPressed: onTap,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(action),
+                ),
+            ],
+          ),
         ),
       ],
     ),
@@ -1654,144 +2681,254 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
 
   Widget _buildMembersTab() {
     final query = _memberSearch.trim().toLowerCase();
-    final activeCount = _members
-        .where((member) => member['status'] == 'active')
-        .length;
-    final visibleMembers = _members.where((member) {
-      final matchesStatus =
-          _memberStatusFilter == 'all' ||
-          member['status'] == _memberStatusFilter;
+    final visibleMembers = _societyMembers.where((member) {
       final name = '${member['given_name'] ?? ''} ${member['surname'] ?? ''}'
           .toLowerCase();
       final number = (member['member_number'] as String? ?? '').toLowerCase();
-      return matchesStatus &&
-          (query.isEmpty || name.contains(query) || number.contains(query));
+      return query.isEmpty || name.contains(query) || number.contains(query);
     }).toList();
+    final coveredLives = _asMaps(_myCoveredLifeData['covered_lives']);
+    final activeCoveredLives =
+        _myCoveredLifeData['active_covered_life_count'] as int? ?? 0;
+    final maxCoveredLives =
+        _myCoveredLifeData['max_covered_lives_per_member'] as int? ?? 0;
+    final showingCoveredLives = _memberView == 'covered-lives';
     return ListView(
       key: const Key('society-space-members'),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        _pageHeading(
-          'Members',
-          'Roster, membership status, and arrears are visible to society members.',
-        ),
+        _pageHeading('Members', 'Society membership and covered lives.'),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _metric('Active', '$activeCount')),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _metric('Deactivated', '${_members.length - activeCount}'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          key: const Key('society-member-search'),
-          onChanged: (value) => setState(() => _memberSearch = value),
-          decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.search, size: 18),
-            hintText: 'Search name or member number',
-            isDense: true,
-            filled: true,
-            fillColor: AppColors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
         SegmentedButton<String>(
+          key: const Key('member-view-filter'),
           segments: const [
-            ButtonSegment(value: 'active', label: Text('Active')),
-            ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
-            ButtonSegment(value: 'all', label: Text('All')),
+            ButtonSegment(
+              value: 'covered-lives',
+              label: Text('Show covered lives'),
+            ),
+            ButtonSegment(
+              value: 'society-members',
+              label: Text('Show society members'),
+            ),
           ],
-          selected: {_memberStatusFilter},
-          onSelectionChanged: (selection) =>
-              setState(() => _memberStatusFilter = selection.first),
+          selected: {_memberView},
+          onSelectionChanged: (selection) => _selectMemberView(selection.first),
           showSelectedIcon: false,
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Showing ${visibleMembers.length} of ${_members.length} members',
-          style: const TextStyle(color: AppColors.muted, fontSize: 9),
-        ),
-        const SizedBox(height: 5),
-        ...visibleMembers.map((member) {
-          final name =
-              '${member['given_name'] ?? ''} ${member['surname'] ?? ''}'.trim();
-          final inArrears = member['is_in_arrears'] == true;
-          return _panel(
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        if (_isLoadingMemberView)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_memberViewError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
               children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: const Color(0xFFEAF1EC),
-                  foregroundColor: AppColors.forest,
-                  child: Text(
-                    _initials(name),
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                Text(_memberViewError!, textAlign: TextAlign.center),
+                TextButton.icon(
+                  onPressed: _loadMemberView,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Try again'),
+                ),
+              ],
+            ),
+          )
+        else if (showingCoveredLives) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _metric(
+                  'Active covered lives',
+                  '$activeCoveredLives of $maxCoveredLives',
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                key: const Key('add-own-covered-life'),
+                tooltip: 'Add new covered life',
+                onPressed: activeCoveredLives < maxCoveredLives
+                    ? _addOwnCoveredLife
+                    : null,
+                icon: const Icon(Icons.person_add_alt_1),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your covered lives',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          if (coveredLives.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 22),
+              child: Center(child: Text('No covered lives recorded yet.')),
+            ),
+          ...coveredLives.map((life) {
+            final name = life['display_name'] as String? ?? '';
+            final relationship = _formatRole(
+              life['relationship_code'] as String? ?? 'dependent',
+            );
+            return _panel(
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Color(0xFFEAF1EC),
+                    foregroundColor: AppColors.forest,
+                    child: Icon(Icons.person_outline, size: 17),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: const TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          relationship,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        name,
+                      _statusLabel(life['status'] as String? ?? 'active'),
+                      if (life['has_pending_funeral_case'] == true) ...[
+                        const SizedBox(height: 4),
+                        _statusLabel('funeral_pending'),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              margin: const EdgeInsets.only(bottom: 7),
+              padding: const EdgeInsets.all(10),
+            );
+          }),
+          if (activeCoveredLives >= maxCoveredLives)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'Your Society’s covered-life limit has been reached.',
+                style: TextStyle(color: AppColors.muted, fontSize: 10),
+              ),
+            ),
+        ] else ...[
+          const SizedBox(height: 10),
+          if (_canManageMembers)
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                key: const Key('add-society-member'),
+                onPressed: () => _editMember(),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Add member'),
+              ),
+            ),
+          if (_canManageMembers) const SizedBox(height: 10),
+          TextField(
+            key: const Key('society-member-search'),
+            onChanged: (value) => setState(() => _memberSearch = value),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText:
+                  'Search name${_canManageMembers ? ' or member number' : ''}',
+              isDense: true,
+              filled: true,
+              fillColor: AppColors.white,
+              border: OutlineInputBorder(
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Showing ${visibleMembers.length} of ${_societyMembers.length} active society members',
+            style: const TextStyle(color: AppColors.muted, fontSize: 9),
+          ),
+          const SizedBox(height: 5),
+          ...visibleMembers.map((member) {
+            final name =
+                '${member['given_name'] ?? ''} ${member['surname'] ?? ''}'
+                    .trim();
+            final memberNumber = member['member_number'] as String? ?? '';
+            final maskedMemberNumber = memberNumber.length <= 4
+                ? '••••'
+                : '•••• ${memberNumber.substring(memberNumber.length - 4)}';
+            return _panel(
+              InkWell(
+                onTap: _canManageMembers
+                    ? () => _openMemberDetails(member)
+                    : null,
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: const Color(0xFFEAF1EC),
+                      foregroundColor: AppColors.forest,
+                      child: Text(
+                        _initials(name),
                         style: const TextStyle(
-                          color: AppColors.ink,
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '${member['member_number']} · ${member['covered_lives'] ?? 0} covered lives',
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 9,
-                        ),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: AppColors.ink,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (memberNumber.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              maskedMemberNumber,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        inArrears
-                            ? 'In arrears · ${_money(member['arrears_amount'])}'
-                            : 'Up to date',
-                        style: TextStyle(
-                          color: inArrears
-                              ? const Color(0xFF8A5412)
-                              : AppColors.forest,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    _statusLabel('active'),
+                  ],
                 ),
-                _statusLabel(member['status'] as String? ?? 'active'),
-              ],
+              ),
+              margin: const EdgeInsets.only(bottom: 7),
+              padding: const EdgeInsets.all(10),
+            );
+          }),
+          if (visibleMembers.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 22),
+              child: Center(child: Text('No active society members found.')),
             ),
-            margin: const EdgeInsets.only(bottom: 7),
-            padding: const EdgeInsets.all(10),
-          );
-        }),
-        if (visibleMembers.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 22),
-            child: Center(child: Text('No members match this filter.')),
-          ),
+        ],
       ],
     );
   }
@@ -1803,53 +2940,60 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
       children: [
         _pageHeading(
           'Contributions',
-          'Society totals are transparent. Your detailed history is private to you.',
+          _permissions['can_view_finances'] == true
+              ? 'Society totals and your contribution history.'
+              : 'Your contribution history.',
         ),
         const SizedBox(height: 10),
-        _panel(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Society total',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+        if (_permissions['can_view_finances'] == true) ...[
+          _panel(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Society total',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  Text(
-                    _periodLabel(_summary['period_start'] as String?),
-                    style: const TextStyle(color: AppColors.muted, fontSize: 9),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${_money(_summary['total_collected'])} of ${_money(_summary['total_due'])}',
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+                    Text(
+                      _periodLabel(_summary['period_start'] as String?),
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                '${_money(_summary['outstanding'])} outstanding · ${_summary['members_in_arrears'] ?? 0} members in arrears',
-                style: const TextStyle(color: AppColors.muted, fontSize: 10),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Monthly contribution: ${_money(_summary['monthly_contribution'])}',
-                style: const TextStyle(color: AppColors.muted, fontSize: 10),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  '${_money(_summary['total_collected'])} of ${_money(_summary['total_due'])}',
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '${_money(_summary['outstanding'])} outstanding · ${_summary['members_in_arrears'] ?? 0} members in arrears',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 10),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Monthly contribution: ${_money(_summary['monthly_contribution'])}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 10),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 16),
+        ],
         const Text(
           'Your contribution history',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
@@ -1906,90 +3050,179 @@ class _SocietySpaceScreenState extends State<SocietySpaceScreen> {
 
   Widget _buildFuneralCasesTab() {
     final canApprove = _permissions['can_approve_funeral_cases'] == true;
+    final canViewCases = _permissions['can_view_cases'] == true;
+    final pendingCases = canViewCases
+        ? _cases.where((record) => record['status'] == 'pending').toList()
+        : <Map<String, dynamic>>[];
+    final caseHistory = _cases
+        .where((record) => record['status'] != 'pending')
+        .toList();
+
     return ListView(
       key: const Key('society-space-cases'),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
         _pageHeading(
-          'Funeral cases',
-          'Case status is visible to society members. Approval is limited to the assigned Funeral Approver.',
+          canApprove ? 'Funeral case decisions' : 'Funeral cases',
+          canApprove
+              ? 'Review cases awaiting your decision or register a funeral.'
+              : 'Register a funeral and track the status of your cases.',
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _metric('Pending', '${_summary['pending_cases'] ?? 0}'),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            key: const Key('register-funeral-case'),
+            onPressed: _registerFuneralCase,
+            icon: const Icon(Icons.add, size: 17),
+            label: const Text('Register funeral'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.forest,
+              foregroundColor: AppColors.white,
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _metric('Approved', '${_summary['approved_cases'] ?? 0}'),
+          ),
+        ),
+        if (canViewCases) ...[
+          const SizedBox(height: 16),
+          Text(
+            canApprove ? 'Needs your decision' : 'Cases needing officer review',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 7),
+          if (pendingCases.isEmpty)
+            const Text(
+              'No cases are waiting for a decision.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            )
+          else
+            ...pendingCases.map(
+              (caseRecord) =>
+                  _buildFuneralCaseCard(caseRecord, canApprove: canApprove),
+            ),
+          const SizedBox(height: 14),
+          const Text(
+            'Case history',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 7),
+          if (caseHistory.isEmpty)
+            const Text(
+              'No decided cases are available yet.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            )
+          else
+            ...caseHistory.map(
+              (caseRecord) => _buildFuneralCaseCard(caseRecord),
+            ),
+        ] else ...[
+          const SizedBox(height: 16),
+          if (_cases.isEmpty)
+            const Text(
+              'You have not registered any funeral cases.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11),
+            )
+          else
+            ..._cases.map((caseRecord) => _buildFuneralCaseCard(caseRecord)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildFuneralCaseCard(
+    Map<String, dynamic> caseRecord, {
+    bool canApprove = false,
+  }) {
+    final caseId = caseRecord['funeral_case_id'] as String? ?? '';
+    final status = caseRecord['status'] as String? ?? 'pending';
+    final payoutStatus = caseRecord['payout_status'] as String?;
+    final displayStatus = switch (status) {
+      'pending' => 'pending_approval',
+      'approved' => payoutStatus == 'completed' ? 'completed' : 'in_progress',
+      _ => status,
+    };
+    final memberName =
+        '${caseRecord['given_name'] ?? ''} ${caseRecord['surname'] ?? ''}'
+            .trim();
+    final deceasedName =
+        '${caseRecord['deceased_given_name'] ?? ''} ${caseRecord['deceased_surname'] ?? ''}'
+            .trim();
+    final dateOfDeath = DateTime.tryParse(
+      '${caseRecord['date_of_death'] ?? ''}',
+    );
+    return _panel(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  caseRecord['case_reference'] as String? ?? 'Funeral case',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              _statusLabel(displayStatus),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            'Member ${caseRecord['member_number'] ?? ''} · $memberName',
+            style: const TextStyle(color: AppColors.muted, fontSize: 9),
+          ),
+          if (deceasedName.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Deceased: $deceasedName',
+              style: const TextStyle(fontSize: 10),
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        if (_cases.isEmpty)
-          const Text(
-            'No funeral cases have been recorded.',
-            style: TextStyle(color: AppColors.muted, fontSize: 11),
-          )
-        else
-          ..._cases.map((caseRecord) {
-            final caseId = caseRecord['funeral_case_id'] as String? ?? '';
-            final status = caseRecord['status'] as String? ?? 'pending';
-            final memberName =
-                '${caseRecord['given_name'] ?? ''} ${caseRecord['surname'] ?? ''}'
-                    .trim();
-            return _panel(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          caseRecord['case_reference'] as String? ??
-                              'Funeral case',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      _statusLabel(status),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    'Member ${caseRecord['member_number']} · $memberName',
-                    style: const TextStyle(color: AppColors.muted, fontSize: 9),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    caseRecord['summary'] as String? ?? '',
-                    style: const TextStyle(fontSize: 10, height: 1.4),
-                  ),
-                  if (status == 'pending' && canApprove) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        key: Key('approve-case-$caseId'),
-                        onPressed: () => _approveCase(caseId),
-                        icon: const Icon(Icons.verified_outlined, size: 16),
-                        label: const Text('Approve case'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.forest,
-                          foregroundColor: AppColors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+          if (dateOfDeath != null)
+            Text(
+              'Date of death: ${MaterialLocalizations.of(context).formatMediumDate(dateOfDeath)}',
+              style: const TextStyle(color: AppColors.muted, fontSize: 9),
+            ),
+          const SizedBox(height: 6),
+          if ((caseRecord['summary'] as String? ?? '').isNotEmpty)
+            Text(
+              caseRecord['summary'] as String,
+              style: const TextStyle(fontSize: 10, height: 1.4),
+            ),
+          if (status == 'pending' && canApprove) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: Key('approve-case-$caseId'),
+                onPressed: () => _approveCase(caseId),
+                icon: const Icon(Icons.verified_outlined, size: 16),
+                label: const Text('Approve case'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.forest,
+                  foregroundColor: AppColors.white,
+                ),
               ),
-              margin: const EdgeInsets.only(bottom: 8),
-            );
-          }),
-      ],
+            ),
+          ],
+          if (status == 'approved' &&
+              payoutStatus == 'in_progress' &&
+              _permissions['can_view_finances'] == true) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: Key('complete-payout-$caseId'),
+                onPressed: () => _completeCasePayout(caseId),
+                icon: const Icon(Icons.payments_outlined, size: 16),
+                label: const Text('Mark payout complete'),
+              ),
+            ),
+          ],
+        ],
+      ),
+      margin: const EdgeInsets.only(bottom: 8),
     );
   }
 
@@ -2156,6 +3389,379 @@ class _SocietyInfoRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _OwnCoveredLifeDialog extends StatefulWidget {
+  const _OwnCoveredLifeDialog();
+
+  @override
+  State<_OwnCoveredLifeDialog> createState() => _OwnCoveredLifeDialogState();
+}
+
+class _OwnCoveredLifeDialogState extends State<_OwnCoveredLifeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _givenNameController = TextEditingController();
+  final _surnameController = TextEditingController();
+  final _identityNumberController = TextEditingController();
+  String _relationship = 'dependent';
+
+  @override
+  void dispose() {
+    _givenNameController.dispose();
+    _surnameController.dispose();
+    _identityNumberController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final displayName =
+        '${_givenNameController.text.trim()} ${_surnameController.text.trim()}';
+    Navigator.of(context).pop<Map<String, Object?>>({
+      'displayName': displayName,
+      'identityNumber': _identityNumberController.text.trim().isEmpty
+          ? null
+          : _identityNumberController.text.trim(),
+      'relationshipCode': _relationship,
+      'effectiveFrom': DateTime.now().toIso8601String().substring(0, 10),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Add new covered life'),
+    content: SizedBox(
+      width: 380,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('own-covered-life-given-name'),
+                controller: _givenNameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'First name'),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a first name.'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('own-covered-life-surname'),
+                controller: _surnameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Surname'),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a surname.'
+                    : null,
+              ),
+              TextFormField(
+                key: const Key('own-covered-life-id-number'),
+                controller: _identityNumberController,
+                keyboardType: TextInputType.text,
+                decoration: const InputDecoration(
+                  labelText: 'ID number (optional)',
+                ),
+                validator: (value) {
+                  final id = value?.trim() ?? '';
+                  if (id.isEmpty) return null;
+                  if (id.length < 6 ||
+                      id.length > 32 ||
+                      !RegExp(r'^[a-zA-Z0-9 -]+$').hasMatch(id)) {
+                    return 'Enter a valid ID number.';
+                  }
+                  return null;
+                },
+              ),
+              DropdownButtonFormField<String>(
+                key: const Key('own-covered-life-relationship'),
+                initialValue: _relationship,
+                decoration: const InputDecoration(labelText: 'Relationship'),
+                items: const [
+                  DropdownMenuItem(value: 'spouse', child: Text('Spouse')),
+                  DropdownMenuItem(
+                    value: 'dependent',
+                    child: Text('Dependent'),
+                  ),
+                ],
+                onChanged: (value) =>
+                    setState(() => _relationship = value ?? 'dependent'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const Key('save-own-covered-life'),
+        onPressed: _submit,
+        child: const Text('Add covered life'),
+      ),
+    ],
+  );
+}
+
+class _FuneralRegistrationDialog extends StatefulWidget {
+  const _FuneralRegistrationDialog({required this.existingBankDetails});
+
+  final Map<String, dynamic>? existingBankDetails;
+
+  @override
+  State<_FuneralRegistrationDialog> createState() =>
+      _FuneralRegistrationDialogState();
+}
+
+class _FuneralRegistrationDialogState
+    extends State<_FuneralRegistrationDialog> {
+  static const _bankNames = [
+    'Absa',
+    'African Bank',
+    'Bank Zero',
+    'Bidvest Bank',
+    'Capitec Bank',
+    'Discovery Bank',
+    'FNB',
+    'Grindrod Bank',
+    'Investec',
+    'Nedbank',
+    'Standard Bank',
+    'TymeBank',
+    'Ubank',
+  ];
+
+  final _formKey = GlobalKey<FormState>();
+  final _givenNameController = TextEditingController();
+  final _surnameController = TextEditingController();
+  final _idNumberController = TextEditingController();
+  final _dateOfDeathController = TextEditingController();
+  final _accountNameController = TextEditingController();
+  final _accountNumberController = TextEditingController();
+  String? _bankName;
+  late bool _useExistingBankDetails;
+
+  bool get _hasExistingBankDetails =>
+      widget.existingBankDetails?['bank_name'] is String &&
+      widget.existingBankDetails?['account_name'] is String &&
+      widget.existingBankDetails?['account_number'] is String;
+
+  @override
+  void initState() {
+    super.initState();
+    _useExistingBankDetails = _hasExistingBankDetails;
+    final existingBankName = widget.existingBankDetails?['bank_name'];
+    if (_bankNames.contains(existingBankName)) {
+      _bankName = existingBankName as String;
+    }
+  }
+
+  @override
+  void dispose() {
+    _givenNameController.dispose();
+    _surnameController.dispose();
+    _idNumberController.dispose();
+    _dateOfDeathController.dispose();
+    _accountNameController.dispose();
+    _accountNumberController.dispose();
+    super.dispose();
+  }
+
+  String? _validateIdentity(String? value) {
+    final hasNames =
+        _givenNameController.text.trim().isNotEmpty &&
+        _surnameController.text.trim().isNotEmpty;
+    if (!hasNames && (value == null || value.trim().isEmpty)) {
+      return 'Enter the name and surname or an ID number.';
+    }
+    return null;
+  }
+
+  String? _validateDate(String? value) {
+    final date = value == null ? null : DateTime.tryParse(value.trim());
+    if (date == null) return 'Enter the date as YYYY-MM-DD.';
+    final today = DateTime.now();
+    if (date.isAfter(DateTime(today.year, today.month, today.day))) {
+      return 'The date of death cannot be in the future.';
+    }
+    return null;
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.of(context).pop<Map<String, Object?>>({
+      'givenName': _givenNameController.text.trim(),
+      'surname': _surnameController.text.trim(),
+      'deceasedIdNumber': _idNumberController.text.trim().isEmpty
+          ? null
+          : _idNumberController.text.trim(),
+      'dateOfDeath': _dateOfDeathController.text.trim(),
+      'useExistingBankDetails': _useExistingBankDetails,
+      if (!_useExistingBankDetails) ...{
+        'bankName': _bankName,
+        'accountName': _accountNameController.text.trim(),
+        'accountNumber': _accountNumberController.text.trim(),
+      },
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Register funeral'),
+    content: SizedBox(
+      width: 420,
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                key: const Key('deceased-given-name-field'),
+                controller: _givenNameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'First name'),
+              ),
+              TextFormField(
+                key: const Key('deceased-surname-field'),
+                controller: _surnameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Surname'),
+              ),
+              TextFormField(
+                key: const Key('deceased-id-number-field'),
+                controller: _idNumberController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'ID number (or enter name and surname)',
+                ),
+                validator: _validateIdentity,
+              ),
+              TextFormField(
+                key: const Key('date-of-death-field'),
+                controller: _dateOfDeathController,
+                keyboardType: TextInputType.datetime,
+                decoration: const InputDecoration(
+                  labelText: 'Date of death (YYYY-MM-DD)',
+                ),
+                validator: _validateDate,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Payout bank details',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
+              RadioGroup<bool>(
+                groupValue: _useExistingBankDetails,
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _useExistingBankDetails = value);
+                  }
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    RadioListTile<bool>(
+                      key: const Key('use-existing-bank-details'),
+                      value: true,
+                      enabled: _hasExistingBankDetails,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Yes, use existing bank details'),
+                    ),
+                    if (_hasExistingBankDetails && _useExistingBankDetails)
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF1EC),
+                          border: Border.all(color: AppColors.border),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${widget.existingBankDetails!['bank_name']} · '
+                          '${widget.existingBankDetails!['account_name']}\n'
+                          'Account ${widget.existingBankDetails!['account_number']}',
+                          style: const TextStyle(fontSize: 11, height: 1.5),
+                        ),
+                      ),
+                    if (!_hasExistingBankDetails)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 12, bottom: 4),
+                        child: Text(
+                          'No existing bank details are on file. Enter new details below.',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    RadioListTile<bool>(
+                      key: const Key('enter-new-bank-details'),
+                      value: false,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('No, enter different bank details'),
+                    ),
+                  ],
+                ),
+              ),
+              if (!_useExistingBankDetails) ...[
+                DropdownButtonFormField<String>(
+                  key: const Key('payout-bank-field'),
+                  initialValue: _bankName,
+                  decoration: const InputDecoration(labelText: 'Bank name'),
+                  items: _bankNames
+                      .map(
+                        (bank) =>
+                            DropdownMenuItem(value: bank, child: Text(bank)),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() => _bankName = value),
+                  validator: (value) => value == null ? 'Select a bank.' : null,
+                ),
+                TextFormField(
+                  key: const Key('payout-account-name-field'),
+                  controller: _accountNameController,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Account name'),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Enter the account name.'
+                      : null,
+                ),
+                TextFormField(
+                  key: const Key('payout-account-number-field'),
+                  controller: _accountNumberController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Account number',
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Enter the account number.'
+                      : null,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const Key('submit-funeral-case'),
+        onPressed: _submit,
+        child: const Text('Submit'),
+      ),
+    ],
+  );
 }
 
 class SocietyDirectoryScreen extends StatelessWidget {

@@ -8,6 +8,15 @@
       "program": "${workspaceFolder}/mobile/lib/main.dart",
       "deviceId": "chrome",
       "toolArgs": ["--web-port", "5322"]
+    },
+    {
+      "name": "Attach to Nest API",
+      "type": "node",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

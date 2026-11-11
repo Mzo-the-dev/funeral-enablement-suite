@@ -4,8 +4,15 @@ import { DatabaseService } from '../database/database.service';
 import { LoginDto } from './dto/login.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RegisterDto } from './dto/register.dto';
+import { CreateCoveredLifeDto } from './dto/create-covered-life.dto';
+import { CreateFuneralCaseDto } from './dto/create-funeral-case.dto';
+import { CreateSocietyMemberDto } from './dto/create-society-member.dto';
 import { SocietyMembershipRequestDto } from './dto/society-membership-request.dto';
+import { UpdateCoveredLifeDto } from './dto/update-covered-life.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateSocietyMemberDto } from './dto/update-society-member.dto';
+import { PlatformAdminLinkDto } from './dto/platform-admin-link.dto';
+import { PlatformAdminLinkPreviewDto } from './dto/platform-admin-link-preview.dto';
 import { VerifyRegistrationDto } from './dto/verify-registration.dto';
 import { RegistrationService } from './registration.service';
 
@@ -57,6 +64,24 @@ export class RegistrationController {
     return this.registrations.updateMyProfile(sessionToken, body);
   }
 
+  @Post('platform-admin/member-link-preview')
+  previewPlatformAdminMemberLink(
+    @Body() body: PlatformAdminLinkPreviewDto,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.previewPlatformAdminMemberLink(sessionToken, body);
+  }
+
+  @Post('platform-admin/member-links')
+  repairPlatformAdminMemberLink(
+    @Body() body: PlatformAdminLinkDto,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.repairPlatformAdminMemberLink(sessionToken, body);
+  }
+
   @Get('spaces/types')
   spaceTypes(): Promise<{ code: string; display_name: string }[]> {
     return this.registrations.listSpaceTypes();
@@ -96,6 +121,119 @@ export class RegistrationController {
     return this.registrations.getSocietyDashboard(spaceId, sessionToken);
   }
 
+  @Get('spaces/:spaceId/members')
+  activeSocietyMembers(
+    @Param('spaceId') spaceId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>[]> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.listActiveSocietyMembers(spaceId, sessionToken);
+  }
+
+  @Get('spaces/:spaceId/covered-lives')
+  myCoveredLives(
+    @Param('spaceId') spaceId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.getMyCoveredLives(spaceId, sessionToken);
+  }
+
+  @Post('spaces/:spaceId/covered-lives')
+  createMyCoveredLife(
+    @Param('spaceId') spaceId: string,
+    @Body() body: CreateCoveredLifeDto,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.createCoveredLife(spaceId, undefined, sessionToken, body);
+  }
+
+  @Get('spaces/:spaceId/members/:memberId')
+    societyMember(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.getSocietyMember(spaceId, memberId, sessionToken);
+    }
+
+    @Get('spaces/:spaceId/members/:memberId/history')
+    societyMemberHistory(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>[]> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.getSocietyMemberHistory(spaceId, memberId, sessionToken);
+    }
+
+    @Post('spaces/:spaceId/members')
+    createSocietyMember(
+      @Param('spaceId') spaceId: string,
+      @Body() body: CreateSocietyMemberDto,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.createSocietyMember(spaceId, sessionToken, body);
+    }
+
+    @Post('spaces/:spaceId/members/:memberId/update')
+    updateSocietyMember(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Body() body: UpdateSocietyMemberDto,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.updateSocietyMember(spaceId, memberId, sessionToken, body);
+    }
+
+    @Post('spaces/:spaceId/members/:memberId/deactivate')
+    deactivateSocietyMember(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Headers('authorization') authorization?: string,
+    ): Promise<{ status: string }> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.deactivateSocietyMember(spaceId, memberId, sessionToken);
+    }
+
+    @Post('spaces/:spaceId/members/:memberId/covered-lives')
+    createCoveredLife(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Body() body: CreateCoveredLifeDto,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.createCoveredLife(spaceId, memberId, sessionToken, body);
+    }
+
+    @Post('spaces/:spaceId/members/:memberId/covered-lives/:coveredLifeId/update')
+    updateCoveredLife(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Param('coveredLifeId') coveredLifeId: string,
+      @Body() body: UpdateCoveredLifeDto,
+      @Headers('authorization') authorization?: string,
+    ): Promise<Record<string, unknown>> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.updateCoveredLife(spaceId, memberId, coveredLifeId, sessionToken, body);
+    }
+
+    @Post('spaces/:spaceId/members/:memberId/covered-lives/:coveredLifeId/deactivate')
+    deactivateCoveredLife(
+      @Param('spaceId') spaceId: string,
+      @Param('memberId') memberId: string,
+      @Param('coveredLifeId') coveredLifeId: string,
+      @Headers('authorization') authorization?: string,
+    ): Promise<{ status: string }> {
+      const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+      return this.registrations.deactivateCoveredLife(spaceId, memberId, coveredLifeId, sessionToken);
+    }
+
   @Post('spaces/:spaceId/join-requests')
   requestSocietyMembership(
     @Param('spaceId') spaceId: string,
@@ -124,5 +262,25 @@ export class RegistrationController {
   ): Promise<{ status: string }> {
     const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
     return this.registrations.approveFuneralCase(spaceId, caseId, sessionToken);
+  }
+
+  @Post('spaces/:spaceId/funeral-cases/:caseId/complete-payout')
+  completeFuneralCasePayout(
+    @Param('spaceId') spaceId: string,
+    @Param('caseId') caseId: string,
+    @Headers('authorization') authorization?: string,
+  ): Promise<{ status: string }> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.completeFuneralCasePayout(spaceId, caseId, sessionToken);
+  }
+
+  @Post('spaces/:spaceId/funeral-cases')
+  registerFuneralCase(
+    @Param('spaceId') spaceId: string,
+    @Body() body: CreateFuneralCaseDto,
+    @Headers('authorization') authorization?: string,
+  ): Promise<Record<string, unknown>> {
+    const sessionToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    return this.registrations.registerFuneralCase(spaceId, sessionToken, body);
   }
 }

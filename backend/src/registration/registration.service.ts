@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -15,6 +16,13 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { VerifyRegistrationDto } from './dto/verify-registration.dto';
+import { CreateCoveredLifeDto } from './dto/create-covered-life.dto';
+import { CreateFuneralCaseDto } from './dto/create-funeral-case.dto';
+import { CreateSocietyMemberDto } from './dto/create-society-member.dto';
+import { UpdateCoveredLifeDto } from './dto/update-covered-life.dto';
+import { UpdateSocietyMemberDto } from './dto/update-society-member.dto';
+import { PlatformAdminLinkDto } from './dto/platform-admin-link.dto';
+import { PlatformAdminLinkPreviewDto } from './dto/platform-admin-link-preview.dto';
 
 interface SocietyAccessRow {
   society_id: string;
@@ -29,6 +37,14 @@ interface SocietyAccessRow {
   office_roles: string[];
   can_approve_funeral_cases: boolean;
   can_approve_memberships: boolean;
+  can_manage_members: boolean;
+  can_view_finances: boolean;
+  can_view_cases: boolean;
+}
+
+interface SocietyMemberManagerRow {
+  society_id: string;
+  user_id: string;
 }
 
 interface QuestionRow {
@@ -88,6 +104,22 @@ interface UserProfileRow {
   preferred_name: string;
   avatar_mime_type: string | null;
   avatar_base64: string | null;
+  is_platform_admin: boolean;
+}
+
+interface PlatformAdminLinkTargetRow {
+  user_id: string;
+  account_given_name: string;
+  account_surname: string;
+  member_id: string;
+  member_number: string;
+  member_given_name: string;
+  member_surname: string;
+  member_status: string;
+  linked_app_user_id: string | null;
+  society_id: string;
+  society_code: string;
+  society_name: string;
 }
 
 @Injectable()
@@ -445,7 +477,9 @@ export class RegistrationService {
     if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
     const result = await this.database.query<UserProfileRow>(
       `SELECT profile.given_name, profile.surname, profile.preferred_name,
-              profile.avatar_mime_type, encode(profile.avatar_image, 'base64') AS avatar_base64
+              profile.avatar_mime_type, encode(profile.avatar_image, 'base64') AS avatar_base64,
+              EXISTS (SELECT 1 FROM funeral_spaces.platform_admin admin
+                 WHERE admin.user_id = account.user_id AND admin.is_active) AS is_platform_admin
          FROM funeral_spaces.auth_session session
          JOIN funeral_spaces.app_user account ON account.user_id = session.user_id
          JOIN funeral_spaces.user_profile profile ON profile.user_id = account.user_id
@@ -503,7 +537,9 @@ export class RegistrationService {
           AND session.refresh_token_hash = $1 AND session.revoked_at IS NULL
           AND session.expires_at > now() AND account.status = 'active'
       RETURNING profile.given_name, profile.surname, profile.preferred_name,
-                profile.avatar_mime_type, encode(profile.avatar_image, 'base64') AS avatar_base64`,
+                profile.avatar_mime_type, encode(profile.avatar_image, 'base64') AS avatar_base64,
+                EXISTS (SELECT 1 FROM funeral_spaces.platform_admin admin
+                         WHERE admin.user_id = account.user_id AND admin.is_active) AS is_platform_admin`,
       [
         hashSessionToken(sessionToken),
         preferredName || null,
@@ -602,7 +638,7 @@ export class RegistrationService {
   async getSocietyDashboard(spaceId: string, sessionToken: string | undefined): Promise<Record<string, unknown>> {
     const access = await this.findSocietyAccess(spaceId, sessionToken);
 
-    const [summary, members, contributions, cases, membershipRequests] = await Promise.all([
+    const [summary, members, contributions, cases, membershipRequests, recentActivity, existingPayoutDetails] = await Promise.all([
       this.database.query(
         `WITH current_period AS (
            SELECT max(period_start) AS period_start
@@ -650,18 +686,20 @@ export class RegistrationService {
       this.database.query(
         `SELECT member.member_id, member.member_number, member.given_name, member.surname,
                 member.status::text AS status,
+                member.joined_at::text AS joined_at,
                 (SELECT count(*)::integer FROM funeral_spaces.covered_life life
                   WHERE life.member_id = member.member_id AND life.status = 'active') AS covered_lives,
-                coalesce((SELECT sum(contribution.amount_due - contribution.amount_paid)::float8
+                CASE WHEN $2::boolean THEN coalesce((SELECT sum(contribution.amount_due - contribution.amount_paid)::float8
                             FROM funeral_spaces.society_contribution contribution
                            WHERE contribution.member_id = member.member_id
                              AND contribution.due_date < current_date
-                             AND contribution.status <> 'waived'), 0)::float8 AS arrears_amount
+                             AND contribution.status <> 'waived'), 0)::float8 ELSE 0::float8 END AS arrears_amount
            FROM funeral_spaces.society_member member
           WHERE member.society_id = $1
+            AND ($3::boolean OR member.member_id = $4)
           ORDER BY CASE member.status WHEN 'active' THEN 0 ELSE 1 END,
                    member.surname, member.given_name, member.member_number`,
-        [access.society_id],
+        [access.society_id, access.can_view_finances, access.can_manage_members, access.member_id],
       ),
       access.member_id
         ? this.database.query(
@@ -677,7 +715,10 @@ export class RegistrationService {
         : Promise.resolve({ rows: [] }),
       this.database.query(
         `SELECT case_record.funeral_case_id, case_record.case_reference,
-                case_record.status::text AS status, case_record.summary,
+                case_record.status::text AS status,
+                case_record.payout_status::text AS payout_status, case_record.summary,
+          case_record.deceased_given_name, case_record.deceased_surname,
+          case_record.date_of_death::text AS date_of_death,
                 case_record.reported_at::text AS reported_at,
                 member.member_number, member.given_name, member.surname,
                 approver.member_number AS approved_by_member_number
@@ -687,10 +728,29 @@ export class RegistrationService {
              ON approver.member_id = case_record.approved_by_member_id
             AND approver.society_id = case_record.society_id
           WHERE case_record.society_id = $1
+            AND (
+              case_record.member_id = $3
+              OR ($2::boolean AND (
+                NOT ('vice_chairperson' = ANY($4::text[]))
+                OR case_record.assigned_to_member_id = $3
+              ))
+            )
           ORDER BY CASE case_record.status WHEN 'pending' THEN 0 ELSE 1 END,
                    case_record.reported_at DESC`,
-        [access.society_id],
+        [access.society_id, access.can_view_cases, access.member_id, access.office_roles],
       ),
+      access.member_id
+        ? this.database.query(
+            `SELECT payout_bank_name AS bank_name,
+                    payout_account_name AS account_name,
+                    payout_account_number AS account_number
+               FROM funeral_spaces.funeral_case
+              WHERE member_id = $1 AND payout_bank_name IS NOT NULL
+              ORDER BY reported_at DESC
+              LIMIT 1`,
+            [access.member_id],
+          )
+        : Promise.resolve({ rows: [] }),
       access.can_approve_memberships
         ? this.database.query(
             `SELECT request.membership_request_id, request.requested_member_number,
@@ -703,6 +763,41 @@ export class RegistrationService {
             [access.society_id],
           )
         : Promise.resolve({ rows: [] }),
+      this.database.query(
+        `SELECT activity_type, occurred_at::text AS occurred_at, event_count, amount
+           FROM (
+             SELECT 'contributions_received'::text AS activity_type,
+                    date_trunc('day', paid_at) AS occurred_at,
+                    count(*)::integer AS event_count,
+                    sum(amount_paid)::float8 AS amount
+               FROM funeral_spaces.society_contribution
+              WHERE society_id = $1 AND paid_at >= now() - interval '30 days'
+              GROUP BY date_trunc('day', paid_at)
+             UNION ALL
+             SELECT action AS activity_type, occurred_at, 1::integer AS event_count,
+                    NULL::float8 AS amount
+               FROM funeral_spaces.society_record_change
+              WHERE society_id = $1 AND occurred_at >= now() - interval '30 days'
+             UNION ALL
+             SELECT 'funeral_cases_reported'::text AS activity_type,
+                    date_trunc('day', reported_at) AS occurred_at,
+                    count(*)::integer AS event_count, NULL::float8 AS amount
+               FROM funeral_spaces.funeral_case
+              WHERE society_id = $1 AND reported_at >= now() - interval '30 days'
+              GROUP BY date_trunc('day', reported_at)
+             UNION ALL
+             SELECT 'funeral_cases_approved'::text AS activity_type,
+                    date_trunc('day', approved_at) AS occurred_at,
+                    count(*)::integer AS event_count, NULL::float8 AS amount
+               FROM funeral_spaces.funeral_case
+              WHERE society_id = $1 AND status = 'approved'
+                AND approved_at >= now() - interval '30 days'
+              GROUP BY date_trunc('day', approved_at)
+           ) activity
+          ORDER BY occurred_at DESC
+          LIMIT 8`,
+        [access.society_id],
+      ),
     ]);
 
     return {
@@ -720,17 +815,447 @@ export class RegistrationService {
       permissions: {
         can_approve_funeral_cases: access.can_approve_funeral_cases,
         can_approve_memberships: access.can_approve_memberships,
+        can_manage_members: access.can_manage_members,
+        can_view_finances: access.can_view_finances,
+        can_view_cases: access.can_view_cases,
       },
       summary: summary.rows[0],
+      recent_activity: recentActivity.rows,
       members: members.rows.map((member) => ({
         ...member,
         is_in_arrears: Number(member.arrears_amount) > 0,
       })),
       my_contributions: contributions.rows,
       funeral_cases: cases.rows,
+      existing_payout_details: existingPayoutDetails.rows[0] ?? null,
       membership_requests: membershipRequests.rows,
     };
   }
+
+  async getSocietyMember(
+        spaceId: string,
+        memberId: string,
+        sessionToken: string | undefined,
+      ): Promise<Record<string, unknown>> {
+        const access = await this.findSocietyAccess(spaceId, sessionToken);
+        if (!access.can_manage_members && access.member_id !== memberId) {
+          throw new ForbiddenException('You can only view your own membership record.');
+        }
+        const member = await this.database.query(
+          `SELECT member_id, member_number, given_name, surname, status::text AS status,
+                  joined_at::text AS joined_at, deactivated_at::text AS deactivated_at
+             FROM funeral_spaces.society_member
+            WHERE society_id = $1 AND member_id = $2`,
+          [access.society_id, memberId],
+        );
+        if (!member.rows[0]) throw new ConflictException('This member record was not found.');
+        const coveredLives = await this.database.query(
+          `SELECT covered_life_id, person_number, display_name, identity_number, relationship_code,
+                  status::text AS status, effective_from::text AS effective_from,
+                  effective_to::text AS effective_to
+             FROM funeral_spaces.covered_life
+            WHERE member_id = $1
+            ORDER BY person_number`,
+          [memberId],
+        );
+        return { ...member.rows[0], covered_lives: coveredLives.rows };
+      }
+
+      async listActiveSocietyMembers(
+        spaceId: string,
+        sessionToken: string | undefined,
+      ): Promise<Record<string, unknown>[]> {
+        const access = await this.findSocietyAccess(spaceId, sessionToken);
+        const result = await this.database.query(
+          `SELECT member.member_id,
+                  CASE WHEN $2::boolean THEN member.member_number END AS member_number,
+                  member.given_name, member.surname, member.status::text AS status,
+                  count(life.covered_life_id) FILTER (WHERE life.status = 'active')::integer
+                    AS covered_lives,
+                  CASE WHEN $3::boolean THEN coalesce((
+                    SELECT sum(contribution.amount_due - contribution.amount_paid)::float8
+                      FROM funeral_spaces.society_contribution contribution
+                     WHERE contribution.member_id = member.member_id
+                       AND contribution.due_date < current_date
+                       AND contribution.status <> 'waived'
+                  ), 0)::float8 ELSE NULL END AS arrears_amount
+             FROM funeral_spaces.society_member member
+             LEFT JOIN funeral_spaces.covered_life life USING (member_id)
+            WHERE member.society_id = $1 AND member.status = 'active'
+            GROUP BY member.member_id
+            ORDER BY member.surname, member.given_name, member.member_number`,
+          [access.society_id, access.can_manage_members, access.can_view_finances],
+        );
+        return result.rows.map((member) => ({
+          ...member,
+          is_in_arrears: Number(member.arrears_amount) > 0,
+        }));
+      }
+
+      async getMyCoveredLives(
+        spaceId: string,
+        sessionToken: string | undefined,
+      ): Promise<Record<string, unknown>> {
+        const access = await this.findSocietyAccess(spaceId, sessionToken);
+        if (!access.member_id) {
+          throw new ForbiddenException('An active linked Society member record is required.');
+        }
+        const [member, coveredLives] = await Promise.all([
+          this.database.query(
+            `SELECT society.max_covered_lives_per_member,
+                    count(life.covered_life_id) FILTER (WHERE life.status = 'active')::integer
+                      AS active_covered_life_count
+               FROM funeral_spaces.society_member member
+               JOIN funeral_spaces.society society USING (society_id)
+               LEFT JOIN funeral_spaces.covered_life life USING (member_id)
+              WHERE member.member_id = $1 AND member.society_id = $2
+                AND member.status = 'active'
+              GROUP BY society.society_id`,
+            [access.member_id, access.society_id],
+          ),
+          this.database.query(
+            `SELECT life.covered_life_id, life.person_number, life.display_name,
+                    life.identity_number, life.relationship_code,
+                    life.status::text AS status,
+                    life.effective_from::text AS effective_from,
+                    life.effective_to::text AS effective_to,
+                    EXISTS (
+                      SELECT 1 FROM funeral_spaces.funeral_case case_record
+                       WHERE case_record.deceased_covered_life_id = life.covered_life_id
+                         AND case_record.status = 'pending'
+                    ) AS has_pending_funeral_case
+               FROM funeral_spaces.covered_life life
+              WHERE life.member_id = $1
+              ORDER BY life.person_number`,
+            [access.member_id],
+          ),
+        ]);
+        if (!member.rows[0]) {
+          throw new ForbiddenException('An active linked Society member record is required.');
+        }
+        return {
+          member_id: access.member_id,
+          max_covered_lives_per_member: member.rows[0].max_covered_lives_per_member,
+          active_covered_life_count: member.rows[0].active_covered_life_count,
+          covered_lives: coveredLives.rows,
+        };
+      }
+
+      async getSocietyMemberHistory(
+        spaceId: string,
+        memberId: string,
+        sessionToken: string | undefined,
+      ): Promise<Record<string, unknown>[]> {
+        const manager = await this.findSocietyMemberManager(spaceId, sessionToken);
+        const history = await this.database.query(
+          `SELECT change_id, action, before_data, after_data, actor_user_id,
+                  occurred_at::text AS occurred_at
+             FROM funeral_spaces.society_record_change
+            WHERE society_id = $1 AND member_id = $2
+            ORDER BY occurred_at DESC, change_id DESC`,
+          [manager.society_id, memberId],
+        );
+        return history.rows;
+      }
+
+      async createSocietyMember(
+        spaceId: string,
+        sessionToken: string | undefined,
+        input: CreateSocietyMemberDto,
+      ): Promise<Record<string, unknown>> {
+        try {
+          return await this.database.transaction(async (client) => {
+            const manager = await this.findSocietyMemberManager(spaceId, sessionToken, client);
+            const data = {
+              member_number: input.memberNumber.trim(),
+              given_name: input.givenName.trim(),
+              surname: input.surname.trim(),
+              joined_at: input.joinedAt,
+              status: 'active',
+            };
+            const result = await client.query(
+              `INSERT INTO funeral_spaces.society_member
+                 (society_id, member_number, given_name, surname, joined_at)
+               VALUES ($1, $2, $3, $4, $5::date)
+               RETURNING member_id, member_number, given_name, surname,
+                         status::text AS status, joined_at::text AS joined_at`,
+              [manager.society_id, data.member_number, data.given_name, data.surname, data.joined_at],
+            );
+            const member = result.rows[0] as Record<string, unknown>;
+            await this.recordSocietyChange(client, manager, member.member_id as string, null, 'member_created', null, data);
+            return { ...member, covered_lives: [] };
+          });
+        } catch (error) {
+          if (isUniqueViolation(error)) throw new ConflictException('That member number is already in use.');
+          throw error;
+        }
+      }
+
+      async updateSocietyMember(
+        spaceId: string,
+        memberId: string,
+        sessionToken: string | undefined,
+        input: UpdateSocietyMemberDto,
+      ): Promise<Record<string, unknown>> {
+        if (Object.keys(input).length === 0) throw new BadRequestException('Provide at least one member field to update.');
+        try {
+          return await this.database.transaction(async (client) => {
+            const manager = await this.findSocietyMemberManager(spaceId, sessionToken, client);
+            const currentResult = await client.query(
+              `SELECT member_id, member_number, given_name, surname, joined_at::text AS joined_at,
+                      status::text AS status
+                 FROM funeral_spaces.society_member
+                WHERE society_id = $1 AND member_id = $2
+                FOR UPDATE`,
+              [manager.society_id, memberId],
+            );
+            const current = currentResult.rows[0] as Record<string, unknown> | undefined;
+            if (!current) throw new ConflictException('This member record was not found.');
+            if (current.status !== 'active') throw new ConflictException('A deactivated member record cannot be edited.');
+            const next = {
+              member_number: input.memberNumber?.trim() ?? current.member_number,
+              given_name: input.givenName?.trim() ?? current.given_name,
+              surname: input.surname?.trim() ?? current.surname,
+              joined_at: input.joinedAt ?? current.joined_at,
+            };
+            const result = await client.query(
+              `UPDATE funeral_spaces.society_member
+                  SET member_number = $3, given_name = $4, surname = $5,
+                      joined_at = $6::date, updated_at = now()
+                WHERE society_id = $1 AND member_id = $2
+                RETURNING member_id, member_number, given_name, surname,
+                          status::text AS status, joined_at::text AS joined_at`,
+              [manager.society_id, memberId, next.member_number, next.given_name, next.surname, next.joined_at],
+            );
+            await this.recordSocietyChange(client, manager, memberId, null, 'member_updated', current, next);
+            return result.rows[0];
+          });
+        } catch (error) {
+          if (isUniqueViolation(error)) throw new ConflictException('That member number is already in use.');
+          throw error;
+        }
+      }
+
+      async deactivateSocietyMember(
+        spaceId: string,
+        memberId: string,
+        sessionToken: string | undefined,
+      ): Promise<{ status: string }> {
+        return this.database.transaction(async (client) => {
+          const manager = await this.findSocietyMemberManager(spaceId, sessionToken, client);
+          const currentResult = await client.query(
+            `SELECT member_id, member_number, given_name, surname, joined_at::text AS joined_at,
+                    status::text AS status, deactivated_at::text AS deactivated_at
+               FROM funeral_spaces.society_member
+              WHERE society_id = $1 AND member_id = $2
+              FOR UPDATE`,
+            [manager.society_id, memberId],
+          );
+          const current = currentResult.rows[0] as Record<string, unknown> | undefined;
+          if (!current) throw new ConflictException('This member record was not found.');
+          if (current.status === 'deactivated') throw new ConflictException('This member is already deactivated.');
+          const coveredLives = await client.query(
+            `UPDATE funeral_spaces.covered_life
+                SET status = 'deactivated', effective_to = GREATEST(current_date, effective_from)
+              WHERE member_id = $1 AND status = 'active'
+              RETURNING covered_life_id, person_number, display_name, relationship_code,
+                        status::text AS status, effective_from::text AS effective_from,
+                        effective_to::text AS effective_to`,
+            [memberId],
+          );
+          for (const life of coveredLives.rows) {
+            const { covered_life_id, ...snapshot } = life;
+            await this.recordSocietyChange(
+              client, manager, memberId, covered_life_id as string,
+              'covered_life_deactivated', null, snapshot,
+            );
+          }
+          await client.query(
+            `UPDATE funeral_spaces.society_member
+                SET status = 'deactivated', deactivated_at = now(), updated_at = now()
+              WHERE society_id = $1 AND member_id = $2`,
+            [manager.society_id, memberId],
+          );
+          await client.query(
+            `UPDATE funeral_spaces.society_office_assignment SET ended_at = now()
+              WHERE society_id = $1 AND member_id = $2 AND ended_at IS NULL`,
+            [manager.society_id, memberId],
+          );
+          await client.query(
+            `UPDATE funeral_spaces.space_membership
+                SET status = 'revoked', revoked_at = now(), updated_at = now()
+              WHERE society_id = $1 AND society_member_id = $2 AND status IN ('active', 'suspended')`,
+            [manager.society_id, memberId],
+          );
+          await this.recordSocietyChange(
+            client, manager, memberId, null, 'member_deactivated', current,
+            { ...current, status: 'deactivated' },
+          );
+          return { status: 'deactivated' };
+        });
+      }
+
+      async createCoveredLife(
+        spaceId: string,
+        requestedMemberId: string | undefined,
+        sessionToken: string | undefined,
+        input: CreateCoveredLifeDto,
+      ): Promise<Record<string, unknown>> {
+        try {
+          const access = await this.findSocietyAccess(spaceId, sessionToken);
+          const memberId = requestedMemberId ?? access.member_id;
+          if (!memberId) {
+            throw new ForbiddenException('An active linked Society member record is required.');
+          }
+          if (!access.can_manage_members && access.member_id !== memberId) {
+            throw new ForbiddenException('You can only add covered lives to your own membership.');
+          }
+          return await this.database.transaction(async (client) => {
+            const member = await client.query<{
+              max_covered_lives_per_member: number;
+            }>(
+              `SELECT society.max_covered_lives_per_member
+                 FROM funeral_spaces.society_member member
+                 JOIN funeral_spaces.society society USING (society_id)
+                WHERE member.society_id = $1 AND member.member_id = $2
+                  AND member.status = 'active'
+                FOR UPDATE OF member`,
+              [access.society_id, memberId],
+            );
+            if (!member.rows[0]) {
+              throw new ConflictException('This active Society member record was not found.');
+            }
+            const activeCount = await client.query<{ active_count: number }>(
+              `SELECT count(*)::integer AS active_count
+                 FROM funeral_spaces.covered_life
+                WHERE member_id = $1 AND status = 'active'`,
+              [memberId],
+            );
+            const maxCoveredLives = member.rows[0].max_covered_lives_per_member;
+            if (activeCount.rows[0].active_count >= maxCoveredLives) {
+              throw new ConflictException(
+                `This Society allows up to ${maxCoveredLives} active covered lives per member.`,
+              );
+            }
+            const personNumber = input.personNumber ?? (await client.query<{ person_number: number }>(
+              `SELECT candidate::smallint AS person_number
+                 FROM generate_series(1, 100) AS candidate
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM funeral_spaces.covered_life life
+                   WHERE life.member_id = $1 AND life.person_number = candidate
+                )
+                ORDER BY candidate
+                LIMIT 1`,
+              [memberId],
+            )).rows[0]?.person_number;
+            if (!personNumber) {
+              throw new ConflictException('No covered-life numbers are available for this member.');
+            }
+            const actor = { society_id: access.society_id, user_id: access.user_id };
+            const data = {
+              person_number: personNumber,
+              display_name: input.displayName.trim(),
+              identity_number: input.identityNumber?.trim() || null,
+              relationship_code: input.relationshipCode,
+              effective_from: input.effectiveFrom,
+              effective_to: input.effectiveTo ?? null,
+            };
+            const result = await client.query(
+              `INSERT INTO funeral_spaces.covered_life
+                 (member_id, person_number, display_name, identity_number, relationship_code, effective_from, effective_to)
+               VALUES ($1, $2, $3, $4, $5, $6::date, $7::date)
+               RETURNING covered_life_id, person_number, display_name, identity_number, relationship_code,
+                         status::text AS status, effective_from::text AS effective_from,
+                         effective_to::text AS effective_to`,
+              [memberId, data.person_number, data.display_name, data.identity_number, data.relationship_code, data.effective_from, data.effective_to],
+            );
+            const life = result.rows[0] as Record<string, unknown>;
+            await this.recordSocietyChange(
+              client, actor, memberId, life.covered_life_id as string,
+              'covered_life_added', null, data,
+            );
+            return life;
+          });
+        } catch (error) {
+          if (isUniqueViolation(error)) throw new ConflictException('That person number is already in use for this member.');
+          throw error;
+        }
+      }
+
+      async updateCoveredLife(
+        spaceId: string,
+        memberId: string,
+        coveredLifeId: string,
+        sessionToken: string | undefined,
+        input: UpdateCoveredLifeDto,
+      ): Promise<Record<string, unknown>> {
+        if (Object.keys(input).length === 0) throw new BadRequestException('Provide at least one covered-life field to update.');
+        return this.database.transaction(async (client) => {
+          const manager = await this.findSocietyMemberManager(spaceId, sessionToken, client);
+          await this.requireActiveSocietyMember(client, manager.society_id, memberId);
+          const currentResult = await client.query(
+            `SELECT covered_life_id, person_number, display_name, identity_number, relationship_code,
+                    status::text AS status, effective_from::text AS effective_from,
+                    effective_to::text AS effective_to
+               FROM funeral_spaces.covered_life
+              WHERE member_id = $1 AND covered_life_id = $2
+              FOR UPDATE`,
+            [memberId, coveredLifeId],
+          );
+          const current = currentResult.rows[0] as Record<string, unknown> | undefined;
+          if (!current) throw new ConflictException('This covered-life record was not found.');
+          if (current.status !== 'active') throw new ConflictException('This covered-life record is deactivated.');
+          const next = {
+            display_name: input.displayName?.trim() ?? current.display_name,
+            identity_number: input.identityNumber === undefined
+              ? current.identity_number
+              : input.identityNumber?.trim() || null,
+            relationship_code: input.relationshipCode ?? current.relationship_code,
+            effective_from: input.effectiveFrom ?? current.effective_from,
+            effective_to: input.effectiveTo === undefined ? current.effective_to : input.effectiveTo,
+          };
+          const result = await client.query(
+            `UPDATE funeral_spaces.covered_life
+                SET display_name = $3, identity_number = $4, relationship_code = $5,
+                  effective_from = $6::date, effective_to = $7::date
+              WHERE member_id = $1 AND covered_life_id = $2
+                RETURNING covered_life_id, person_number, display_name, identity_number, relationship_code,
+                        status::text AS status, effective_from::text AS effective_from,
+                        effective_to::text AS effective_to`,
+              [memberId, coveredLifeId, next.display_name, next.identity_number, next.relationship_code, next.effective_from, next.effective_to],
+          );
+          await this.recordSocietyChange(
+            client, manager, memberId, coveredLifeId, 'covered_life_updated', current, next,
+          );
+          return result.rows[0];
+        });
+      }
+
+      async deactivateCoveredLife(
+        spaceId: string,
+        memberId: string,
+        coveredLifeId: string,
+        sessionToken: string | undefined,
+      ): Promise<{ status: string }> {
+        return this.database.transaction(async (client) => {
+          const manager = await this.findSocietyMemberManager(spaceId, sessionToken, client);
+          await this.requireActiveSocietyMember(client, manager.society_id, memberId);
+          const result = await client.query(
+            `UPDATE funeral_spaces.covered_life
+                SET status = 'deactivated', effective_to = GREATEST(current_date, effective_from)
+              WHERE member_id = $1 AND covered_life_id = $2 AND status = 'active'
+              RETURNING person_number, display_name, relationship_code,
+                        status::text AS status, effective_from::text AS effective_from,
+                        effective_to::text AS effective_to`,
+            [memberId, coveredLifeId],
+          );
+          if (!result.rows[0]) throw new ConflictException('This active covered-life record was not found.');
+          await this.recordSocietyChange(
+            client, manager, memberId, coveredLifeId, 'covered_life_deactivated', null, result.rows[0],
+          );
+          return { status: 'deactivated' };
+        });
+      }
 
   async submitSocietyMembershipRequest(
     spaceId: string,
@@ -770,6 +1295,161 @@ export class RegistrationService {
     return { status: 'pending' };
   }
 
+  async previewPlatformAdminMemberLink(
+    sessionToken: string | undefined,
+    input: PlatformAdminLinkPreviewDto,
+  ): Promise<Record<string, unknown>> {
+    await this.findPlatformAdmin(sessionToken);
+    const target = await this.findPlatformAdminLinkTarget(
+      null,
+      input.identity,
+      input.societyCode,
+      input.memberNumber,
+      false,
+    );
+    const space = await this.findSocietySpaceForPlatformAdminLink(null, target.society_id);
+    return {
+      account: {
+        user_id: target.user_id,
+        given_name: target.account_given_name,
+        surname: target.account_surname,
+      },
+      member: {
+        member_id: target.member_id,
+        member_number: target.member_number,
+        given_name: target.member_given_name,
+        surname: target.member_surname,
+      },
+      society: { society_id: target.society_id, code: target.society_code, name: target.society_name },
+      space,
+      already_linked: target.linked_app_user_id === target.user_id,
+    };
+  }
+
+  async repairPlatformAdminMemberLink(
+    sessionToken: string | undefined,
+    input: PlatformAdminLinkDto,
+  ): Promise<Record<string, unknown>> {
+    if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
+    return this.database.transaction(async (client) => {
+      const admin = await this.findPlatformAdmin(sessionToken, client);
+      const target = await this.findPlatformAdminLinkTarget(
+        client,
+        input.identity,
+        input.societyCode,
+        input.memberNumber,
+        true,
+      );
+      const space = await this.findSocietySpaceForPlatformAdminLink(client, target.society_id);
+
+      const pendingRequest = await client.query(
+        `SELECT membership_request_id
+           FROM funeral_spaces.society_membership_request
+          WHERE society_id = $1 AND user_id = $2 AND status = 'pending'
+          FOR UPDATE`,
+        [target.society_id, target.user_id],
+      );
+      if (pendingRequest.rows.length > 0) {
+        throw new ConflictException(
+          'A Society membership request is pending; resolve it through the Society approval workflow first.',
+        );
+      }
+
+      const memberships = await client.query<{
+        membership_id: string;
+        society_member_id: string | null;
+        status: string;
+      }>(
+        `SELECT membership_id, society_member_id, status::text AS status
+           FROM funeral_spaces.space_membership
+          WHERE user_id = $1 AND space_id = $2
+          ORDER BY created_at DESC
+          FOR UPDATE`,
+        [target.user_id, space.space_id],
+      );
+      const eligibleMemberships = memberships.rows.filter(
+        (membership) => membership.status === 'active' || membership.status === 'pending',
+      );
+      if (eligibleMemberships.length > 1) {
+        throw new ConflictException('Multiple current memberships exist; this requires manual review.');
+      }
+      if (eligibleMemberships.length === 0 && memberships.rows.length > 0) {
+        throw new ConflictException('A suspended or revoked Space membership cannot be restored by this repair.');
+      }
+
+      const membership = eligibleMemberships[0];
+      if (membership?.society_member_id && membership.society_member_id !== target.member_id) {
+        throw new ConflictException('This account already has a different member record in that Space.');
+      }
+
+      const alreadyLinked = target.linked_app_user_id === target.user_id &&
+        membership?.status === 'active' && membership.society_member_id === target.member_id;
+      if (alreadyLinked) {
+        return { status: 'already_linked', member_number: target.member_number, space_name: space.display_name };
+      }
+
+      const before = {
+        linked_app_user_id: target.linked_app_user_id,
+        membership_status: membership?.status ?? null,
+        membership_member_id: membership?.society_member_id ?? null,
+      };
+      if (target.linked_app_user_id === null) {
+        await client.query(
+          `UPDATE funeral_spaces.society_member
+              SET linked_app_user_id = $2, updated_at = now()
+            WHERE member_id = $1 AND linked_app_user_id IS NULL`,
+          [target.member_id, target.user_id],
+        );
+      }
+
+      if (membership) {
+        await client.query(
+          `UPDATE funeral_spaces.space_membership
+              SET society_member_id = $2, status = 'active', activated_at = coalesce(activated_at, now()),
+                  revoked_at = NULL, granted_by_user_id = $3, updated_at = now()
+            WHERE membership_id = $1`,
+          [membership.membership_id, target.member_id, admin.user_id],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO funeral_spaces.space_membership
+             (user_id, space_id, society_id, society_member_id, role_code,
+              status, requested_at, activated_at, granted_by_user_id)
+           VALUES ($1, $2, $3, $4, 'member', 'active', now(), now(), $5)`,
+          [target.user_id, space.space_id, target.society_id, target.member_id, admin.user_id],
+        );
+      }
+
+      const after = {
+        linked_app_user_id: target.user_id,
+        membership_status: 'active',
+        membership_member_id: target.member_id,
+      };
+      await client.query(
+        `INSERT INTO funeral_spaces.platform_admin_audit
+           (actor_user_id, action, target_user_id, society_id, target_member_id,
+            reason, before_data, after_data)
+         VALUES ($1, 'member_account_linked', $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
+        [
+          admin.user_id,
+          target.user_id,
+          target.society_id,
+          target.member_id,
+          input.reason.trim(),
+          JSON.stringify(before),
+          JSON.stringify(after),
+        ],
+      );
+      return {
+        status: 'linked',
+        member_number: target.member_number,
+        member_name: `${target.member_given_name} ${target.member_surname}`,
+        society_name: target.society_name,
+        space_name: space.display_name,
+      };
+    });
+  }
+
   async approveFuneralCase(
     spaceId: string,
     caseId: string,
@@ -777,17 +1457,170 @@ export class RegistrationService {
   ): Promise<{ status: string }> {
     if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
     return this.database.transaction(async (client) => {
-      const approver = await this.findOfficeApprover(client, spaceId, sessionToken, 'funeral_approver');
+      const approver = await this.findOfficeApprover(client, spaceId, sessionToken, [
+        'chairperson', 'vice_chairperson', 'funeral_approver',
+      ]);
       const result = await client.query(
         `UPDATE funeral_spaces.funeral_case
-            SET status = 'approved', approved_at = now(),
+            SET status = 'approved', payout_status = 'in_progress', approved_at = now(),
                 approved_by_member_id = $3, approved_by_user_id = $4
           WHERE funeral_case_id = $1 AND society_id = $2 AND status = 'pending'
+            AND ($5::text <> 'vice_chairperson' OR assigned_to_member_id = $3)
           RETURNING funeral_case_id`,
-        [caseId, approver.society_id, approver.member_id, approver.user_id],
+        [caseId, approver.society_id, approver.member_id, approver.user_id, approver.role_code],
       );
       if (result.rowCount !== 1) throw new ConflictException('This case is no longer pending approval.');
       return { status: 'approved' };
+    });
+  }
+
+  async completeFuneralCasePayout(
+    spaceId: string,
+    caseId: string,
+    sessionToken: string | undefined,
+  ): Promise<{ status: string }> {
+    if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
+    return this.database.transaction(async (client) => {
+      const officer = await this.findOfficeApprover(client, spaceId, sessionToken, [
+        'chairperson', 'treasurer',
+      ]);
+      const result = await client.query(
+        `UPDATE funeral_spaces.funeral_case
+            SET payout_status = 'completed', payout_completed_at = now(),
+                payout_completed_by_member_id = $3, payout_completed_by_user_id = $4
+          WHERE funeral_case_id = $1 AND society_id = $2
+            AND status = 'approved' AND payout_status = 'in_progress'
+          RETURNING funeral_case_id`,
+        [caseId, officer.society_id, officer.member_id, officer.user_id],
+      );
+      if (result.rowCount !== 1) {
+        throw new ConflictException('This case is not awaiting payout completion.');
+      }
+      return { status: 'completed' };
+    });
+  }
+
+  async registerFuneralCase(
+    spaceId: string,
+    sessionToken: string | undefined,
+    input: CreateFuneralCaseDto,
+  ): Promise<Record<string, unknown>> {
+    if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
+    const givenName = input.givenName?.trim() || null;
+    const surname = input.surname?.trim() || null;
+    const deceasedIdNumber = input.deceasedIdNumber?.trim() || null;
+    if ((!givenName || !surname) && !deceasedIdNumber) {
+      throw new BadRequestException('Enter the deceased person’s name and surname or ID number.');
+    }
+    const dateOfDeath = input.dateOfDeath.slice(0, 10);
+    if (Number.isNaN(Date.parse(dateOfDeath)) || dateOfDeath > new Date().toISOString().slice(0, 10)) {
+      throw new BadRequestException('Enter a valid date of death that is not in the future.');
+    }
+    const access = await this.findSocietyAccess(spaceId, sessionToken);
+    if (!access.member_id) {
+      throw new ForbiddenException('An active Society member record is required to register a funeral.');
+    }
+
+    return this.database.transaction(async (client) => {
+      const deceased = await client.query<{ covered_life_id: string }>(
+        `SELECT covered_life_id
+           FROM funeral_spaces.covered_life
+          WHERE member_id = $1 AND status = 'active'
+            AND effective_from <= $2::date
+            AND (effective_to IS NULL OR effective_to >= $2::date)
+            AND (
+              ($3::text IS NOT NULL AND identity_number = $3)
+              OR ($4::text IS NOT NULL
+                  AND lower(regexp_replace(trim(display_name), '\\s+', ' ', 'g')) = lower($4))
+            )
+          LIMIT 1`,
+        [
+          access.member_id,
+          dateOfDeath,
+          deceasedIdNumber,
+          givenName && surname ? `${givenName} ${surname}`.replace(/\s+/g, ' ').trim() : null,
+        ],
+      );
+      if (!deceased.rows[0]) {
+        throw new ConflictException('The deceased person is not listed as an active covered life for your membership.');
+      }
+
+      let bankName: string | null;
+      let accountName: string | null;
+      let accountNumber: string | null;
+      if (input.useExistingBankDetails) {
+        const existingDetails = await client.query<{
+          bank_name: string;
+          account_name: string;
+          account_number: string;
+        }>(
+          `SELECT payout_bank_name AS bank_name,
+                  payout_account_name AS account_name,
+                  payout_account_number AS account_number
+             FROM funeral_spaces.funeral_case
+            WHERE member_id = $1 AND payout_bank_name IS NOT NULL
+            ORDER BY reported_at DESC
+            LIMIT 1`,
+          [access.member_id],
+        );
+        if (!existingDetails.rows[0]) {
+          throw new BadRequestException('No existing bank details are on file. Select No and enter the payout details.');
+        }
+        bankName = existingDetails.rows[0].bank_name;
+        accountName = existingDetails.rows[0].account_name;
+        accountNumber = existingDetails.rows[0].account_number;
+      } else {
+        bankName = input.bankName?.trim() || null;
+        accountName = input.accountName?.trim() || null;
+        accountNumber = input.accountNumber?.trim() || null;
+        if (!bankName || !accountName || !accountNumber) {
+          throw new BadRequestException('Enter the bank name, account name, and account number.');
+        }
+      }
+
+      const identityLabel = givenName && surname
+        ? `${givenName} ${surname}`.replace(/\s+/g, ' ').trim()
+        : deceasedIdNumber!;
+      const summary = `Funeral for ${identityLabel}, date of death ${dateOfDeath}`;
+      const viceChairperson = await client.query<{ member_id: string }>(
+        `SELECT assignment.member_id
+           FROM funeral_spaces.society_office_assignment assignment
+          WHERE assignment.society_id = $1 AND assignment.role_code = 'vice_chairperson'
+            AND assignment.ended_at IS NULL AND assignment.effective_from <= current_date`,
+        [access.society_id],
+      );
+      if (!viceChairperson.rows[0]) {
+        throw new ConflictException('Assign a Vice Chairperson before registering a funeral.');
+      }
+
+      const created = await client.query(
+        `INSERT INTO funeral_spaces.funeral_case
+           (society_id, member_id, assigned_to_member_id, deceased_covered_life_id,
+            deceased_given_name, deceased_surname, deceased_id_number, date_of_death,
+            uses_existing_bank_details, payout_bank_name, payout_account_name,
+            payout_account_number, case_reference, summary)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12,
+                 'FC-' || upper(replace(gen_random_uuid()::text, '-', '')),
+           $13)
+         RETURNING funeral_case_id, case_reference, status::text AS status,
+                   reported_at::text AS reported_at`,
+        [
+          access.society_id,
+          access.member_id,
+          viceChairperson.rows[0].member_id,
+          deceased.rows[0].covered_life_id,
+          givenName,
+          surname,
+          deceasedIdNumber,
+          dateOfDeath,
+          input.useExistingBankDetails,
+          bankName,
+          accountName,
+          accountNumber,
+          summary,
+        ],
+      );
+      return created.rows[0];
     });
   }
 
@@ -798,7 +1631,7 @@ export class RegistrationService {
   ): Promise<{ status: string }> {
     if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
     return this.database.transaction(async (client) => {
-      const chairperson = await this.findOfficeApprover(client, spaceId, sessionToken, 'chairperson');
+      const chairperson = await this.findOfficeApprover(client, spaceId, sessionToken, ['chairperson']);
       const requestResult = await client.query<{
         membership_request_id: string;
         user_id: string;
@@ -848,6 +1681,186 @@ export class RegistrationService {
     });
   }
 
+  private async findSocietyMemberManager(
+        spaceId: string,
+        sessionToken: string | undefined,
+        client?: PoolClient,
+      ): Promise<SocietyMemberManagerRow> {
+        if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
+        const sql = `SELECT society.society_id, account.user_id
+             FROM funeral_spaces.auth_session session
+             JOIN funeral_spaces.app_user account ON account.user_id = session.user_id
+             JOIN funeral_spaces.space_membership membership ON membership.user_id = account.user_id
+             JOIN funeral_spaces.space space
+               ON space.space_id = membership.space_id AND space.society_id = membership.society_id
+             JOIN funeral_spaces.society society ON society.society_id = membership.society_id
+             JOIN funeral_spaces.society_member member
+               ON member.member_id = membership.society_member_id
+              AND member.society_id = membership.society_id
+              AND member.linked_app_user_id = account.user_id
+             JOIN funeral_spaces.society_office_assignment assignment
+               ON assignment.society_id = society.society_id
+              AND assignment.member_id = member.member_id
+              AND assignment.role_code IN ('chairperson', 'secretary')
+              AND assignment.ended_at IS NULL
+              AND assignment.effective_from <= current_date
+            WHERE session.refresh_token_hash = $1 AND session.revoked_at IS NULL
+              AND session.expires_at > now() AND account.status = 'active'
+              AND membership.status = 'active' AND membership.space_id = $2
+              AND space.status = 'active' AND society.status = 'active'
+              AND member.status = 'active'
+            LIMIT 1`;
+        const values = [hashSessionToken(sessionToken), spaceId];
+        const result = client
+          ? await client.query<SocietyMemberManagerRow>(sql, values)
+          : await this.database.query<SocietyMemberManagerRow>(sql, values);
+        const manager = result.rows[0];
+        if (!manager) throw new ForbiddenException('Only the assigned chairperson or secretary can manage Society records.');
+        return manager;
+      }
+
+      private async requireActiveSocietyMember(
+        client: PoolClient,
+        societyId: string,
+        memberId: string,
+      ): Promise<void> {
+        const result = await client.query(
+          `SELECT 1 FROM funeral_spaces.society_member
+            WHERE society_id = $1 AND member_id = $2 AND status = 'active'`,
+          [societyId, memberId],
+        );
+        if (result.rowCount !== 1) throw new ConflictException('An active member record is required.');
+      }
+
+      private async recordSocietyChange(
+        client: PoolClient,
+        manager: SocietyMemberManagerRow,
+        memberId: string,
+        coveredLifeId: string | null,
+        action: string,
+        beforeData: Record<string, unknown> | null,
+        afterData: Record<string, unknown>,
+      ): Promise<void> {
+        await client.query(
+          `INSERT INTO funeral_spaces.society_record_change
+             (society_id, member_id, covered_life_id, actor_user_id, action, before_data, after_data)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
+          [
+            manager.society_id,
+            memberId,
+            coveredLifeId,
+            manager.user_id,
+            action,
+            beforeData === null ? null : JSON.stringify(beforeData),
+            JSON.stringify(afterData),
+          ],
+        );
+      }
+
+  private async findPlatformAdmin(
+    sessionToken: string | undefined,
+    client?: PoolClient,
+  ): Promise<{ user_id: string }> {
+    if (!sessionToken?.trim()) throw new UnauthorizedException('A valid session is required.');
+    const sql = `SELECT admin.user_id
+         FROM funeral_spaces.auth_session session
+         JOIN funeral_spaces.app_user account ON account.user_id = session.user_id
+         JOIN funeral_spaces.platform_admin admin
+           ON admin.user_id = account.user_id AND admin.is_active
+        WHERE session.refresh_token_hash = $1 AND session.revoked_at IS NULL
+          AND session.expires_at > now() AND account.status = 'active'`;
+    const values = [hashSessionToken(sessionToken)];
+    const result = client
+      ? await client.query<{ user_id: string }>(sql, values)
+      : await this.database.query<{ user_id: string }>(sql, values);
+    const admin = result.rows[0];
+    if (!admin) throw new ForbiddenException('An active platform-admin role is required.');
+    return admin;
+  }
+
+  private async findPlatformAdminLinkTarget(
+    client: PoolClient | null,
+    rawIdentity: string,
+    rawSocietyCode: string,
+    rawMemberNumber: string,
+    lockRows: boolean,
+  ): Promise<PlatformAdminLinkTargetRow> {
+    const identity = rawIdentity.trim().toLowerCase();
+    const societyCode = rawSocietyCode.trim().toUpperCase();
+    const memberNumber = rawMemberNumber.trim().toUpperCase();
+    if (!identity || !societyCode || !memberNumber) {
+      throw new BadRequestException('Enter an account identity, Society code, and member number.');
+    }
+    const sql = `WITH candidates AS (
+           SELECT user_id
+             FROM funeral_spaces.auth_login_identifier
+            WHERE normalized_value = $1
+           UNION
+           SELECT user_id
+             FROM funeral_spaces.user_contact
+            WHERE contact_type = 'email' AND is_verified = true
+              AND normalized_value = $1
+         )
+         SELECT account.user_id, profile.given_name AS account_given_name,
+                profile.surname AS account_surname, member.member_id,
+                member.member_number, member.given_name AS member_given_name,
+                member.surname AS member_surname, member.status::text AS member_status,
+                member.linked_app_user_id, society.society_id,
+                society.society_code, society.display_name AS society_name
+           FROM candidates
+           JOIN funeral_spaces.app_user account USING (user_id)
+           JOIN funeral_spaces.user_profile profile USING (user_id)
+           JOIN funeral_spaces.society society ON society.society_code = $2
+           JOIN funeral_spaces.society_member member
+             ON member.society_id = society.society_id AND member.member_number = $3
+          WHERE account.status = 'active' AND society.status = 'active'
+          LIMIT 2${lockRows ? '\n          FOR UPDATE OF account, member' : ''}`;
+    const values = [identity, societyCode, memberNumber];
+    const result = client
+      ? await client.query<PlatformAdminLinkTargetRow>(sql, values)
+      : await this.database.query<PlatformAdminLinkTargetRow>(sql, values);
+    if (result.rows.length !== 1) {
+      throw new NotFoundException('No unique active account and Society member match those details.');
+    }
+
+    const target = result.rows[0];
+    if (target.member_status !== 'active') {
+      throw new ConflictException('Only an active Society member can be linked.');
+    }
+    if (target.linked_app_user_id && target.linked_app_user_id !== target.user_id) {
+      throw new ConflictException('That Society member is already linked to another account.');
+    }
+
+    const otherMemberSql = `SELECT member_id
+         FROM funeral_spaces.society_member
+        WHERE society_id = $1 AND linked_app_user_id = $2 AND member_id <> $3
+        LIMIT 1`;
+    const otherMember = client
+      ? await client.query(otherMemberSql, [target.society_id, target.user_id, target.member_id])
+      : await this.database.query(otherMemberSql, [target.society_id, target.user_id, target.member_id]);
+    if (otherMember.rowCount) {
+      throw new ConflictException('That account is already linked to another member in this Society.');
+    }
+    return target;
+  }
+
+  private async findSocietySpaceForPlatformAdminLink(
+    client: PoolClient | null,
+    societyId: string,
+  ): Promise<{ space_id: string; display_name: string }> {
+    const sql = `SELECT space.space_id, space.display_name
+         FROM funeral_spaces.space space
+         JOIN funeral_spaces.space_type type USING (space_type_id)
+        WHERE space.society_id = $1 AND space.status = 'active' AND type.code = 'society'`;
+    const result = client
+      ? await client.query<{ space_id: string; display_name: string }>(sql, [societyId])
+      : await this.database.query<{ space_id: string; display_name: string }>(sql, [societyId]);
+    if (result.rows.length !== 1) {
+      throw new ConflictException('The Society must have exactly one active Society Space to link an account.');
+    }
+    return result.rows[0];
+  }
+
   private async findSocietyAccess(
     spaceId: string,
     sessionToken: string | undefined,
@@ -868,7 +1881,7 @@ export class RegistrationService {
                 SELECT 1 FROM funeral_spaces.society_office_assignment assignment
                  WHERE assignment.society_id = society.society_id
                    AND assignment.member_id = member.member_id
-                   AND assignment.role_code = 'funeral_approver'
+                   AND assignment.role_code IN ('chairperson', 'vice_chairperson', 'funeral_approver')
                    AND assignment.ended_at IS NULL
                    AND assignment.effective_from <= current_date
               ) AS can_approve_funeral_cases,
@@ -879,7 +1892,31 @@ export class RegistrationService {
                    AND assignment.role_code = 'chairperson'
                    AND assignment.ended_at IS NULL
                    AND assignment.effective_from <= current_date
-              ) AS can_approve_memberships
+              ) AS can_approve_memberships,
+              EXISTS (
+                SELECT 1 FROM funeral_spaces.society_office_assignment assignment
+                 WHERE assignment.society_id = society.society_id
+                   AND assignment.member_id = member.member_id
+                   AND assignment.role_code IN ('chairperson', 'secretary')
+                   AND assignment.ended_at IS NULL
+                   AND assignment.effective_from <= current_date
+              ) AS can_manage_members,
+              EXISTS (
+                SELECT 1 FROM funeral_spaces.society_office_assignment assignment
+                 WHERE assignment.society_id = society.society_id
+                   AND assignment.member_id = member.member_id
+                   AND assignment.role_code IN ('chairperson', 'treasurer')
+                   AND assignment.ended_at IS NULL
+                   AND assignment.effective_from <= current_date
+              ) AS can_view_finances,
+              EXISTS (
+                SELECT 1 FROM funeral_spaces.society_office_assignment assignment
+                 WHERE assignment.society_id = society.society_id
+                   AND assignment.member_id = member.member_id
+                   AND assignment.role_code IN ('chairperson', 'vice_chairperson', 'treasurer', 'claim_assessor', 'claim_approver', 'funeral_approver')
+                   AND assignment.ended_at IS NULL
+                   AND assignment.effective_from <= current_date
+              ) AS can_view_cases
          FROM funeral_spaces.auth_session session
          JOIN funeral_spaces.app_user account ON account.user_id = session.user_id
          JOIN funeral_spaces.space_membership membership ON membership.user_id = account.user_id
@@ -906,10 +1943,10 @@ export class RegistrationService {
     client: PoolClient,
     spaceId: string,
     sessionToken: string,
-    requiredRole: 'chairperson' | 'funeral_approver',
-  ): Promise<{ society_id: string; user_id: string; member_id: string }> {
-    const result = await client.query<{ society_id: string; user_id: string; member_id: string }>(
-      `SELECT society.society_id, account.user_id, member.member_id
+    requiredRoles: string[],
+  ): Promise<{ society_id: string; user_id: string; member_id: string; role_code: string }> {
+    const result = await client.query<{ society_id: string; user_id: string; member_id: string; role_code: string }>(
+      `SELECT society.society_id, account.user_id, member.member_id, assignment.role_code
          FROM funeral_spaces.auth_session session
          JOIN funeral_spaces.app_user account ON account.user_id = session.user_id
          JOIN funeral_spaces.space_membership membership ON membership.user_id = account.user_id
@@ -923,7 +1960,7 @@ export class RegistrationService {
          JOIN funeral_spaces.society_office_assignment assignment
            ON assignment.society_id = society.society_id
           AND assignment.member_id = member.member_id
-          AND assignment.role_code = $3
+          AND assignment.role_code = ANY($3::text[])
           AND assignment.ended_at IS NULL
           AND assignment.effective_from <= current_date
         WHERE session.refresh_token_hash = $1 AND session.revoked_at IS NULL
@@ -931,11 +1968,19 @@ export class RegistrationService {
           AND membership.status = 'active' AND membership.space_id = $2
           AND space.status = 'active' AND society.status = 'active'
           AND member.status = 'active'
+        ORDER BY CASE assignment.role_code
+                   WHEN 'vice_chairperson' THEN 0
+                   WHEN 'chairperson' THEN 1
+                   ELSE 2
+                 END
         LIMIT 1`,
-      [hashSessionToken(sessionToken), spaceId, requiredRole],
+      [hashSessionToken(sessionToken), spaceId, requiredRoles],
     );
     const approver = result.rows[0];
-    if (!approver) throw new ForbiddenException(`Only the assigned ${requiredRole.replace('_', ' ')} can approve this request.`);
+    if (!approver) {
+      const roles = requiredRoles.map((role) => role.replaceAll('_', ' ')).join(' or ');
+      throw new ForbiddenException(`Only an assigned ${roles} can approve this request.`);
+    }
     return approver;
   }
 

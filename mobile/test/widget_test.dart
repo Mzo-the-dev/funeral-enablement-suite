@@ -11,8 +11,16 @@ class _FakeRegistrationApi extends RegistrationApi {
   static bool loginCalled = false;
   static bool logoutCalled = false;
   static bool profileUpdateCalled = false;
+  static bool memberCreateCalled = false;
+  static bool coveredLifeCreateCalled = false;
+  static Map<String, Object?>? coveredLifeRegistration;
+  static bool funeralCaseCreateCalled = false;
+  static bool funeralPayoutCompleteCalled = false;
+  static Map<String, Object?>? funeralCaseRegistration;
   static String preferredName = 'Amahle';
   static String? loginIdentity;
+  static bool isPlatformAdmin = false;
+  static bool platformAdminLinkCalled = false;
 
   @override
   Future<Map<String, dynamic>> login({
@@ -35,6 +43,7 @@ class _FakeRegistrationApi extends RegistrationApi {
     'preferred_name': preferredName,
     'avatar_base64': null,
     'avatar_mime_type': null,
+    'is_platform_admin': isPlatformAdmin,
   };
 
   @override
@@ -49,7 +58,38 @@ class _FakeRegistrationApi extends RegistrationApi {
       'preferred_name': preferredName,
       'avatar_base64': null,
       'avatar_mime_type': null,
+      'is_platform_admin': isPlatformAdmin,
     };
+  }
+
+  @override
+  Future<Map<String, dynamic>> previewPlatformAdminMemberLink({
+    required String sessionToken,
+    required String identity,
+    required String societyCode,
+    required String memberNumber,
+  }) async => {
+    'account': {'given_name': 'Amahle', 'surname': 'Dlamini'},
+    'member': {
+      'member_number': memberNumber,
+      'given_name': 'Synthetic Member',
+      'surname': '001',
+    },
+    'society': {'name': 'Stronger Together Society'},
+    'space': {'display_name': 'Stronger Together Society'},
+    'already_linked': false,
+  };
+
+  @override
+  Future<Map<String, dynamic>> repairPlatformAdminMemberLink({
+    required String sessionToken,
+    required String identity,
+    required String societyCode,
+    required String memberNumber,
+    required String reason,
+  }) async {
+    platformAdminLinkCalled = true;
+    return {'status': 'linked'};
   }
 
   @override
@@ -116,10 +156,32 @@ class _DashboardApi extends _ActiveMembershipApi {
   const _DashboardApi({
     this.canApproveCases = false,
     this.canApproveMemberships = false,
+    this.canManageMembers = false,
+    this.canViewFinances = false,
+    this.canViewCases = false,
+    this.existingPayoutDetails,
   });
 
   final bool canApproveCases;
   final bool canApproveMemberships;
+  final bool canManageMembers;
+  final bool canViewFinances;
+  final bool canViewCases;
+  final Map<String, dynamic>? existingPayoutDetails;
+
+  static int coveredLifeLimit = 10;
+  static bool funeralPayoutCompleted = false;
+  static String? pendingFuneralCoveredLifeName;
+  static List<Map<String, dynamic>> coveredLives = [
+    {
+      'covered_life_id': 'covered-life-1',
+      'person_number': 1,
+      'display_name': 'Mia Dlamini',
+      'relationship_code': 'dependent',
+      'status': 'active',
+      'effective_from': '2026-11-05',
+    },
+  ];
 
   @override
   Future<Map<String, dynamic>> getSocietyDashboard({
@@ -135,6 +197,8 @@ class _DashboardApi extends _ActiveMembershipApi {
       'given_name': 'Amahle',
       'role_code': 'member',
       'office_roles': [
+        if (canManageMembers) 'secretary',
+        if (canViewFinances) 'treasurer',
         if (canApproveCases) 'funeral_approver',
         if (canApproveMemberships) 'chairperson',
       ],
@@ -142,6 +206,9 @@ class _DashboardApi extends _ActiveMembershipApi {
     'permissions': {
       'can_approve_funeral_cases': canApproveCases,
       'can_approve_memberships': canApproveMemberships,
+      'can_manage_members': canManageMembers,
+      'can_view_finances': canViewFinances,
+      'can_view_cases': canViewCases || canApproveCases || canViewFinances,
     },
     'summary': {
       'period_start': '2026-10-01',
@@ -157,17 +224,29 @@ class _DashboardApi extends _ActiveMembershipApi {
       'monthly_contribution': 250,
       'joining_fee': 1000,
     },
-    'members': [
+    'recent_activity': [
       {
-        'member_number': 'STS-007',
-        'given_name': 'Lindiwe',
-        'surname': 'Mokoena',
-        'status': 'active',
-        'covered_lives': 2,
-        'arrears_amount': 250,
-        'is_in_arrears': true,
+        'activity_type': 'contributions_received',
+        'occurred_at': '2026-11-05T00:00:00.000Z',
+        'event_count': 3,
+        'amount': 1200,
       },
+    ],
+    'existing_payout_details': existingPayoutDetails,
+    'members': [
+      if (canManageMembers)
+        {
+          'member_id': 'member-007',
+          'member_number': 'STS-007',
+          'given_name': 'Lindiwe',
+          'surname': 'Mokoena',
+          'status': 'active',
+          'covered_lives': 2,
+          'arrears_amount': 250,
+          'is_in_arrears': true,
+        },
       {
+        'member_id': 'member-036',
         'member_number': 'STS-036',
         'given_name': 'Amahle',
         'surname': 'Dlamini',
@@ -176,15 +255,17 @@ class _DashboardApi extends _ActiveMembershipApi {
         'arrears_amount': 0,
         'is_in_arrears': false,
       },
-      {
-        'member_number': 'STS-026',
-        'given_name': 'Thandi',
-        'surname': 'Ndlovu',
-        'status': 'deactivated',
-        'covered_lives': 0,
-        'arrears_amount': 0,
-        'is_in_arrears': false,
-      },
+      if (canManageMembers)
+        {
+          'member_id': 'member-026',
+          'member_number': 'STS-026',
+          'given_name': 'Thandi',
+          'surname': 'Ndlovu',
+          'status': 'deactivated',
+          'covered_lives': 0,
+          'arrears_amount': 0,
+          'is_in_arrears': false,
+        },
     ],
     'my_contributions': [
       {
@@ -194,26 +275,60 @@ class _DashboardApi extends _ActiveMembershipApi {
         'status': 'paid',
       },
     ],
-    'funeral_cases': [
-      {
-        'funeral_case_id': 'case-pending',
-        'case_reference': 'STS-FC-002',
-        'status': 'pending',
-        'summary': 'Awaiting approver review.',
-        'member_number': 'STS-007',
-        'given_name': 'Lindiwe',
-        'surname': 'Mokoena',
-      },
-      {
-        'funeral_case_id': 'case-approved',
-        'case_reference': 'STS-FC-001',
-        'status': 'approved',
-        'summary': 'Approved for demo review.',
-        'member_number': 'STS-004',
-        'given_name': 'Sipho',
-        'surname': 'Khumalo',
-      },
-    ],
+    'funeral_cases': canViewCases || canApproveCases || canViewFinances
+        ? [
+            {
+              'funeral_case_id': 'case-pending',
+              'case_reference': 'STS-FC-002',
+              'status': 'pending',
+              'payout_status': 'not_started',
+              'summary': 'Awaiting approver review.',
+              'member_number': 'STS-007',
+              'given_name': 'Lindiwe',
+              'surname': 'Mokoena',
+            },
+            {
+              'funeral_case_id': 'case-approved',
+              'case_reference': 'STS-FC-001',
+              'status': 'approved',
+              'payout_status': _DashboardApi.funeralPayoutCompleted
+                  ? 'completed'
+                  : 'in_progress',
+              'summary': 'Approved for demo review.',
+              'member_number': 'STS-004',
+              'given_name': 'Sipho',
+              'surname': 'Khumalo',
+            },
+          ]
+        : [
+            {
+              'funeral_case_id': 'case-mine',
+              'case_reference': 'STS-FC-003',
+              'status': 'pending',
+              'payout_status': 'not_started',
+              'summary': 'A funeral reported for my household.',
+              'deceased_given_name': 'Amahle',
+              'deceased_surname': 'Dlamini',
+              'date_of_death': '2026-11-04',
+              'member_number': 'STS-036',
+              'given_name': 'Amahle',
+              'surname': 'Dlamini',
+            },
+            if (_FakeRegistrationApi.funeralCaseCreateCalled)
+              {
+                'funeral_case_id': 'case-created',
+                'case_reference': 'STS-FC-004',
+                'status': 'pending',
+                'payout_status': 'not_started',
+                'summary': 'Awaiting approver review.',
+                'deceased_given_name': 'Mia',
+                'deceased_surname': 'Dlamini',
+                'date_of_death': '2026-11-06',
+                'member_number': 'STS-036',
+                'given_name': 'Amahle',
+                'surname': 'Dlamini',
+              },
+          ],
     'membership_requests': canApproveMemberships
         ? [
             {
@@ -225,6 +340,103 @@ class _DashboardApi extends _ActiveMembershipApi {
           ]
         : <Map<String, dynamic>>[],
   };
+
+  @override
+  Future<List<Map<String, dynamic>>> listActiveSocietyMembers({
+    required String spaceId,
+    required String sessionToken,
+  }) async => [
+    {
+      'member_id': 'member-007',
+      'member_number': canManageMembers ? 'STS-007' : null,
+      'given_name': 'Lindiwe',
+      'surname': 'Mokoena',
+      'status': 'active',
+      'covered_lives': 2,
+    },
+    {
+      'member_id': 'member-036',
+      'member_number': canManageMembers ? 'STS-036' : null,
+      'given_name': 'Amahle',
+      'surname': 'Dlamini',
+      'status': 'active',
+      'covered_lives': coveredLives.length,
+    },
+  ];
+
+  @override
+  Future<Map<String, dynamic>> getMyCoveredLives({
+    required String spaceId,
+    required String sessionToken,
+  }) async => {
+    'member_id': 'member-036',
+    'max_covered_lives_per_member': coveredLifeLimit,
+    'active_covered_life_count': coveredLives
+        .where((life) => life['status'] == 'active')
+        .length,
+    'covered_lives': coveredLives
+        .map(
+          (life) => {
+            ...life,
+            'has_pending_funeral_case':
+                life['display_name'] == pendingFuneralCoveredLifeName,
+          },
+        )
+        .toList(),
+  };
+
+  @override
+  Future<Map<String, dynamic>> createMyCoveredLife({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> coveredLife,
+  }) async {
+    _FakeRegistrationApi.coveredLifeCreateCalled = true;
+    _FakeRegistrationApi.coveredLifeRegistration = coveredLife;
+    final created = <String, dynamic>{
+      'covered_life_id': 'covered-life-${coveredLives.length + 1}',
+      'person_number': coveredLives.length + 1,
+      'display_name': coveredLife['displayName'],
+      'identity_number': coveredLife['identityNumber'],
+      'relationship_code': coveredLife['relationshipCode'],
+      'status': 'active',
+      'effective_from': coveredLife['effectiveFrom'],
+    };
+    coveredLives = [...coveredLives, created];
+    return created;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getSocietyMember({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+  }) async => {
+    'member_id': memberId,
+    'member_number': memberId == 'member-007' ? 'STS-007' : 'STS-036',
+    'given_name': memberId == 'member-007' ? 'Lindiwe' : 'Amahle',
+    'surname': memberId == 'member-007' ? 'Mokoena' : 'Dlamini',
+    'status': 'active',
+    'joined_at': '2026-11-02',
+    'covered_lives': <Map<String, dynamic>>[],
+  };
+
+  @override
+  Future<Map<String, dynamic>> createSocietyMember({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> member,
+  }) async {
+    _FakeRegistrationApi.memberCreateCalled = true;
+    return {'member_id': 'member-new', ...member};
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getSocietyMemberHistory({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+  }) async => [];
 
   @override
   Future<Map<String, dynamic>> approveMembershipRequest({
@@ -239,6 +451,34 @@ class _DashboardApi extends _ActiveMembershipApi {
     required String caseId,
     required String sessionToken,
   }) async => {'status': 'approved'};
+
+  @override
+  Future<Map<String, dynamic>> completeFuneralCasePayout({
+    required String spaceId,
+    required String caseId,
+    required String sessionToken,
+  }) async {
+    _FakeRegistrationApi.funeralPayoutCompleteCalled = true;
+    _DashboardApi.funeralPayoutCompleted = true;
+    return {'status': 'completed'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> registerFuneralCase({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> registration,
+  }) async {
+    _FakeRegistrationApi.funeralCaseCreateCalled = true;
+    _FakeRegistrationApi.funeralCaseRegistration = registration;
+    _DashboardApi.pendingFuneralCoveredLifeName =
+        '${registration['givenName']} ${registration['surname']}';
+    return {
+      'case_reference': 'STS-FC-004',
+      'status': 'pending',
+      'assigned_to': 'vice_chairperson',
+    };
+  }
 }
 
 void main() {
@@ -255,6 +495,70 @@ void main() {
     expect(societyGreetingFor(DateTime(2026, 11, 2, 12)), 'Good afternoon');
     expect(societyGreetingFor(DateTime(2026, 11, 2, 17, 59)), 'Good afternoon');
     expect(societyGreetingFor(DateTime(2026, 11, 2, 18)), 'Good evening');
+  });
+
+  testWidgets('platform admin can review and confirm a scoped account link', (
+    tester,
+  ) async {
+    _FakeRegistrationApi.isPlatformAdmin = true;
+    _FakeRegistrationApi.platformAdminLinkCalled = false;
+    addTearDown(() => _FakeRegistrationApi.isPlatformAdmin = false);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SpacesLandingScreen(
+          api: _ActiveMembershipApi(),
+          sessionToken: 'test-session-token',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('platform-admin-tools')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('platform-admin-tools')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('admin-account-identity')),
+      'synthetic001',
+    );
+    await tester.enterText(
+      find.byKey(const Key('admin-society-code')),
+      'STRONGER-TOGETHER-DEMO',
+    );
+    await tester.enterText(
+      find.byKey(const Key('admin-member-number')),
+      'STS-001',
+    );
+    await tester.enterText(
+      find.byKey(const Key('admin-repair-reason')),
+      'Bootstrap the verified chairperson account',
+    );
+    await tester.tap(find.byKey(const Key('review-member-account-link')));
+    await tester.pumpAndSettle();
+    expect(find.text('STS-001 · Synthetic Member 001'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -450));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('submit-member-account-link')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-member-account-link')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.platformAdminLinkCalled, isTrue);
+    expect(find.text('Account link repaired'), findsOneWidget);
+  });
+
+  testWidgets('ordinary account does not see platform admin repair tools', (
+    tester,
+  ) async {
+    _FakeRegistrationApi.isPlatformAdmin = false;
+    addTearDown(() => _FakeRegistrationApi.isPlatformAdmin = false);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SpacesLandingScreen(
+          api: _ActiveMembershipApi(),
+          sessionToken: 'test-session-token',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('platform-admin-tools')), findsNothing);
   });
 
   testWidgets('starts with username and password login and a signup link', (
@@ -375,6 +679,7 @@ void main() {
 
   testWidgets('shows the linked society as an active Space', (tester) async {
     _FakeRegistrationApi.profileUpdateCalled = false;
+    _FakeRegistrationApi.memberCreateCalled = false;
     _FakeRegistrationApi.preferredName = 'Amahle';
     tester.view.physicalSize = const Size(440, 956);
     tester.view.devicePixelRatio = 1;
@@ -384,7 +689,11 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(
         home: SpacesLandingScreen(
-          api: _DashboardApi(),
+          api: _DashboardApi(
+            canManageMembers: true,
+            canViewFinances: true,
+            canViewCases: true,
+          ),
           sessionToken: 'test-session-token',
         ),
       ),
@@ -448,10 +757,26 @@ void main() {
 
     await tester.tap(find.byKey(const Key('society-tab-members')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add-society-member')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('member-number-field')),
+      'STS-041',
+    );
+    await tester.enterText(
+      find.byKey(const Key('member-given-name-field')),
+      'Nandi',
+    );
+    await tester.enterText(
+      find.byKey(const Key('member-surname-field')),
+      'Zwane',
+    );
+    await tester.tap(find.byKey(const Key('save-society-member')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.memberCreateCalled, isTrue);
     expect(find.text('Lindiwe Mokoena'), findsOneWidget);
-    expect(find.text('Thandi Ndlovu'), findsOneWidget);
-    expect(find.text('Deactivated'), findsWidgets);
-    expect(find.text('In arrears · R250.00'), findsOneWidget);
+    expect(find.text('Thandi Ndlovu'), findsNothing);
+    expect(find.text('In arrears · R250.00'), findsNothing);
     expect(find.byKey(const Key('society-member-search')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('society-tab-contributions')));
@@ -474,6 +799,207 @@ void main() {
     expect(find.text('Membership applications'), findsNothing);
   });
 
+  testWidgets('ordinary members only see their own Society data', (
+    tester,
+  ) async {
+    useTallTestViewport(tester);
+    _DashboardApi.coveredLifeLimit = 10;
+    _DashboardApi.pendingFuneralCoveredLifeName = null;
+    _DashboardApi.coveredLives = [
+      {
+        'covered_life_id': 'covered-life-1',
+        'person_number': 1,
+        'display_name': 'Mia Dlamini',
+        'relationship_code': 'dependent',
+        'status': 'active',
+        'effective_from': '2026-11-05',
+      },
+    ];
+    _FakeRegistrationApi.coveredLifeCreateCalled = false;
+    _FakeRegistrationApi.coveredLifeRegistration = null;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SocietySpaceScreen(
+          space: const {
+            'space_id': 'demo-space-id',
+            'society_name': 'Stronger Together Society',
+            'role_code': 'member',
+          },
+          api: const _DashboardApi(
+            existingPayoutDetails: {
+              'bank_name': 'Capitec Bank',
+              'account_name': 'Amahle Dlamini',
+              'account_number': '1234567890',
+            },
+          ),
+          sessionToken: 'test-session-token',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('At a glance'), findsOneWidget);
+    expect(find.text('Needs attention'), findsOneWidget);
+    expect(find.text('Recent activity'), findsOneWidget);
+    expect(find.text('26'), findsOneWidget);
+    expect(find.text('R6000.00'), findsOneWidget);
+    expect(find.text('Recent activity'), findsOneWidget);
+    expect(find.text('R1200.00 received'), findsOneWidget);
+    expect(find.text('Lindiwe Mokoena'), findsNothing);
+    expect(find.byKey(const Key('add-society-member')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('society-tab-members')));
+    await tester.pumpAndSettle();
+    expect(find.text('Amahle Dlamini'), findsOneWidget);
+    expect(find.text('Lindiwe Mokoena'), findsOneWidget);
+    expect(find.textContaining('arrears'), findsNothing);
+    expect(find.text('Thandi Ndlovu'), findsNothing);
+
+    await tester.tap(find.text('Show covered lives'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mia Dlamini'), findsOneWidget);
+    expect(find.text('1 of 10'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('add-own-covered-life')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('own-covered-life-given-name')),
+      'Lena',
+    );
+    await tester.enterText(
+      find.byKey(const Key('own-covered-life-surname')),
+      'Dlamini',
+    );
+    await tester.enterText(
+      find.byKey(const Key('own-covered-life-id-number')),
+      'A1234567',
+    );
+    await tester.tap(find.byKey(const Key('save-own-covered-life')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.coveredLifeCreateCalled, isTrue);
+    expect(
+      _FakeRegistrationApi.coveredLifeRegistration,
+      containsPair('displayName', 'Lena Dlamini'),
+    );
+    expect(
+      _FakeRegistrationApi.coveredLifeRegistration,
+      containsPair('identityNumber', 'A1234567'),
+    );
+    expect(
+      _FakeRegistrationApi.coveredLifeRegistration,
+      containsPair('relationshipCode', 'dependent'),
+    );
+    expect(find.text('Lena Dlamini'), findsOneWidget);
+    expect(find.text('2 of 10'), findsOneWidget);
+
+    _DashboardApi.coveredLifeLimit = 2;
+    await tester.tap(find.text('Show society members'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Show covered lives'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 of 2'), findsOneWidget);
+    expect(
+      find.text('Your Society’s covered-life limit has been reached.'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('add-own-covered-life')))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.byKey(const Key('society-tab-contributions')));
+    await tester.pumpAndSettle();
+    expect(find.text('Society total'), findsNothing);
+    expect(find.text('Your contribution history'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('register-funeral-case')), findsOneWidget);
+    expect(find.text('STS-FC-003'), findsOneWidget);
+    expect(find.text('Pending Approval'), findsOneWidget);
+    expect(find.text('Deceased: Amahle Dlamini'), findsOneWidget);
+    expect(find.textContaining('restricted'), findsNothing);
+    expect(find.text('STS-FC-002'), findsNothing);
+    expect(find.text('STS-FC-001'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('register-funeral-case')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Capitec Bank · Amahle Dlamini'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Account 1234567890'), findsOneWidget);
+    expect(find.byKey(const Key('payout-bank-field')), findsNothing);
+    await tester.tap(find.byKey(const Key('enter-new-bank-details')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('payout-bank-field')), findsOneWidget);
+    expect(find.byKey(const Key('payout-account-name-field')), findsOneWidget);
+    expect(
+      find.byKey(const Key('payout-account-number-field')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const Key('deceased-given-name-field')),
+      'Mia',
+    );
+    await tester.enterText(
+      find.byKey(const Key('deceased-surname-field')),
+      'Dlamini',
+    );
+    await tester.enterText(
+      find.byKey(const Key('date-of-death-field')),
+      '2026-11-06',
+    );
+    await tester.tap(find.byKey(const Key('payout-bank-field')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('FNB').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('payout-account-name-field')),
+      'Mia Dlamini',
+    );
+    await tester.enterText(
+      find.byKey(const Key('payout-account-number-field')),
+      '9876543210',
+    );
+    await tester.tap(find.byKey(const Key('submit-funeral-case')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.funeralCaseCreateCalled, isTrue);
+    expect(
+      _FakeRegistrationApi.funeralCaseRegistration,
+      containsPair('givenName', 'Mia'),
+    );
+    expect(
+      _FakeRegistrationApi.funeralCaseRegistration,
+      containsPair('dateOfDeath', '2026-11-06'),
+    );
+    expect(
+      _FakeRegistrationApi.funeralCaseRegistration,
+      containsPair('bankName', 'FNB'),
+    );
+    expect(
+      _FakeRegistrationApi.funeralCaseRegistration,
+      containsPair('useExistingBankDetails', false),
+    );
+    expect(find.text('Funeral registered'), findsOneWidget);
+    expect(
+      find.text(
+        'The funeral was successfully registered and is pending approval.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.text('STS-FC-004'), findsOneWidget);
+    expect(find.text('Pending Approval'), findsNWidgets(2));
+    await tester.tap(find.byKey(const Key('society-tab-members')));
+    await tester.pumpAndSettle();
+    expect(find.text('Active'), findsNWidgets(2));
+    expect(find.text('Funeral Pending'), findsOneWidget);
+  });
+
   testWidgets('office approvals are limited to their assigned roles', (
     tester,
   ) async {
@@ -487,7 +1013,7 @@ void main() {
         MaterialApp(
           home: SocietySpaceScreen(
             key: ValueKey(
-              '${api.canApproveCases}-${api.canApproveMemberships}',
+              '${api.canApproveCases}-${api.canApproveMemberships}-${api.canViewFinances}',
             ),
             space: {
               'space_id': 'demo-space-id',
@@ -523,6 +1049,17 @@ void main() {
       find.byKey(const Key('approve-membership-request-1')),
       findsOneWidget,
     );
+
+    _DashboardApi.funeralPayoutCompleted = false;
+    _FakeRegistrationApi.funeralPayoutCompleteCalled = false;
+    await openDashboard(const _DashboardApi(canViewFinances: true));
+    await tester.tap(find.byKey(const Key('society-tab-cases')));
+    await tester.pumpAndSettle();
+    expect(find.text('In Progress'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('complete-payout-case-approved')));
+    await tester.pumpAndSettle();
+    expect(_FakeRegistrationApi.funeralPayoutCompleteCalled, isTrue);
+    expect(find.text('Completed'), findsOneWidget);
   });
 
   testWidgets('registration contains the requested account fields', (

@@ -36,7 +36,7 @@ select
     1,
     1,
     0,
-    0,
+    1,
     0,
     0,
     now()
@@ -101,6 +101,28 @@ update set
 where
     funeral_spaces.society_member.linked_app_user_id is null
     or funeral_spaces.society_member.linked_app_user_id = EXCLUDED.linked_app_user_id;
+
+
+insert into funeral_spaces.covered_life
+        (member_id, person_number, display_name, relationship_code, effective_from)
+select member.member_id, 1, 'Test Account', 'member', current_date
+    from funeral_spaces.society_member member
+    join funeral_spaces.society society using (society_id)
+ where society.society_code = 'STRONGER-TOGETHER-DEMO'
+     and member.member_number = 'STS-036'
+     and member.status = 'active'
+on conflict (member_id, person_number) do nothing;
+
+
+update funeral_spaces.society_onboarding_batch batch
+     set covered_life_count = (
+             select count(*)::integer
+                 from funeral_spaces.covered_life life
+                 join funeral_spaces.society_member member using (member_id)
+                where member.onboarding_batch_id = batch.onboarding_batch_id
+                    and member.member_number = 'STS-036'
+     )
+    where batch.idempotency_key = 'stronger-together-testperson-v1';
 
 
 insert into

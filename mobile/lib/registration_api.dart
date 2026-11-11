@@ -62,6 +62,42 @@ class RegistrationApi {
     );
   }
 
+  Future<Map<String, dynamic>> previewPlatformAdminMemberLink({
+    required String sessionToken,
+    required String identity,
+    required String societyCode,
+    required String memberNumber,
+  }) {
+    return _post(
+      '/platform-admin/member-link-preview',
+      {
+        'identity': identity,
+        'societyCode': societyCode,
+        'memberNumber': memberNumber,
+      },
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> repairPlatformAdminMemberLink({
+    required String sessionToken,
+    required String identity,
+    required String societyCode,
+    required String memberNumber,
+    required String reason,
+  }) {
+    return _post(
+      '/platform-admin/member-links',
+      {
+        'identity': identity,
+        'societyCode': societyCode,
+        'memberNumber': memberNumber,
+        'reason': reason,
+      },
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
   Future<List<Map<String, dynamic>>> listSpaceTypes() {
     return _getList('/spaces/types');
   }
@@ -83,6 +119,137 @@ class RegistrationApi {
   }) {
     return _getMap(
       '/spaces/${Uri.encodeComponent(spaceId)}/dashboard',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listActiveSocietyMembers({
+    required String spaceId,
+    required String sessionToken,
+  }) {
+    return _getList(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> getMyCoveredLives({
+    required String spaceId,
+    required String sessionToken,
+  }) {
+    return _getMap(
+      '/spaces/${Uri.encodeComponent(spaceId)}/covered-lives',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> createMyCoveredLife({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> coveredLife,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/covered-lives',
+      coveredLife,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> getSocietyMember({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+  }) {
+    return _getMap(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getSocietyMemberHistory({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+  }) {
+    return _getList(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/history',
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> createSocietyMember({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> member,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members',
+      member,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> updateSocietyMember({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+    required Map<String, Object?> changes,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/update',
+      changes,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<void> deactivateSocietyMember({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+  }) async {
+    await _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/deactivate',
+      const {},
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> createCoveredLife({
+    required String spaceId,
+    required String memberId,
+    required String sessionToken,
+    required Map<String, Object?> coveredLife,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/covered-lives',
+      coveredLife,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> updateCoveredLife({
+    required String spaceId,
+    required String memberId,
+    required String coveredLifeId,
+    required String sessionToken,
+    required Map<String, Object?> changes,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/covered-lives/${Uri.encodeComponent(coveredLifeId)}/update',
+      changes,
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<void> deactivateCoveredLife({
+    required String spaceId,
+    required String memberId,
+    required String coveredLifeId,
+    required String sessionToken,
+  }) async {
+    await _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/members/${Uri.encodeComponent(memberId)}/covered-lives/${Uri.encodeComponent(coveredLifeId)}/deactivate',
+      const {},
       headers: {'Authorization': 'Bearer $sessionToken'},
     );
   }
@@ -119,6 +286,30 @@ class RegistrationApi {
     return _post(
       '/spaces/${Uri.encodeComponent(spaceId)}/funeral-cases/${Uri.encodeComponent(caseId)}/approve',
       const {},
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> completeFuneralCasePayout({
+    required String spaceId,
+    required String caseId,
+    required String sessionToken,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/funeral-cases/${Uri.encodeComponent(caseId)}/complete-payout',
+      const {},
+      headers: {'Authorization': 'Bearer $sessionToken'},
+    );
+  }
+
+  Future<Map<String, dynamic>> registerFuneralCase({
+    required String spaceId,
+    required String sessionToken,
+    required Map<String, Object?> registration,
+  }) {
+    return _post(
+      '/spaces/${Uri.encodeComponent(spaceId)}/funeral-cases',
+      registration,
       headers: {'Authorization': 'Bearer $sessionToken'},
     );
   }

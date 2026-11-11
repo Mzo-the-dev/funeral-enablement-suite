@@ -1,6 +1,6 @@
 # Funeral Spaces account and registration ERD
 
-This document explains the PostgreSQL schema implemented by migrations `001_auth_registration.sql` through `005_user_profile_avatar.sql`. It covers account registration/authentication, society onboarding records, active Space membership, and profile avatars. Contribution, claim, invitation, and join-request workflows remain future work.
+This document explains the PostgreSQL schema implemented by migrations `001_auth_registration.sql` through `011_society_covered_life_limit.sql`. It covers account registration/authentication, society onboarding records, active Space membership, audited member/covered-life maintenance, profile avatars, and funeral-case intake/review. Contribution and claim workflows remain future work.
 
 ## 1. Relationship diagram
 
@@ -143,6 +143,7 @@ erDiagram
         uuid society_id PK
         text society_code UK
         text display_name
+        smallint max_covered_lives_per_member
         society_status status
     }
 
@@ -160,6 +161,45 @@ erDiagram
         uuid linked_app_user_id FK, nullable
         text member_number
         society_member_status status
+    }
+
+    COVERED_LIFE {
+        uuid covered_life_id PK
+        uuid member_id FK
+        text display_name
+        text identity_number, nullable
+        covered_life_status status
+    }
+
+    FUNERAL_CASE {
+        uuid funeral_case_id PK
+        uuid society_id FK
+        uuid member_id FK
+        uuid assigned_to_member_id FK
+        uuid deceased_covered_life_id FK
+        text case_reference
+        text status
+        text deceased_given_name
+        text deceased_surname
+        text deceased_id_number
+        date date_of_death
+        boolean uses_existing_bank_details
+        text payout_bank_name
+        text payout_account_name
+        text payout_account_number
+        timestamptz reported_at
+    }
+
+    SOCIETY_RECORD_CHANGE {
+        uuid change_id PK
+        uuid society_id FK
+        uuid member_id FK
+        uuid covered_life_id FK, nullable
+        uuid actor_user_id FK
+        text action
+        jsonb before_data
+        jsonb after_data
+        timestamptz occurred_at
     }
 
     SPACE_MEMBERSHIP {
@@ -193,6 +233,14 @@ erDiagram
     APP_USER o|--o{ SOCIETY_MEMBER : "may be linked to"
     SOCIETY ||--o{ SPACE : "has Spaces"
     SOCIETY ||--o{ SOCIETY_MEMBER : "registers members"
+    SOCIETY_MEMBER ||--o{ COVERED_LIFE : "covers"
+    SOCIETY_MEMBER ||--o{ FUNERAL_CASE : "reports"
+    SOCIETY_MEMBER o|--o{ FUNERAL_CASE : "reviews assigned cases"
+    COVERED_LIFE ||--o{ FUNERAL_CASE : "validates deceased"
+    SOCIETY ||--o{ SOCIETY_RECORD_CHANGE : "audits"
+    SOCIETY_MEMBER ||--o{ SOCIETY_RECORD_CHANGE : "has changes"
+    COVERED_LIFE o|--o{ SOCIETY_RECORD_CHANGE : "may be target"
+    APP_USER ||--o{ SOCIETY_RECORD_CHANGE : "acts in"
     SOCIETY ||--o{ SPACE_MEMBERSHIP : "scopes access"
     SPACE ||--o{ SPACE_MEMBERSHIP : "grants access through"
     SOCIETY_MEMBER o|--o{ SPACE_MEMBERSHIP : "identifies member"
@@ -238,8 +286,11 @@ erDiagram
 | `auth_event`                | Minimal account-security audit events.                                                 | Login success/failure, registration, verification, password change, or session revocation.                                                                                      |
 | `society` / `space`         | Society organization and its Space directory profile.                                  | Active Stronger Together Society and discoverable Society Space.                                                                                                                |
 | `society_member`            | Society roster identity, distinct from an app account.                                 | Synthetic member number and optional linked app account.                                                                                                                        |
+| `covered_life`              | Person covered under a Society member's plan.                                          | Covered person name, relationship, effective dates, and active status.                                                                                                          |
+| `funeral_case`              | Funeral registration, deceased match, payout snapshot, and approval status.            | A pending case assigned to the Vice Chairperson with a validated covered-life reference.                                                                                        |
+| `society_record_change`     | Actor-attributed audit snapshots for roster and covered-life writes.                   | Action, before/after JSONB, actor, target, and timestamp.                                                                                                                       |
 | `space_membership`          | Account authorization to one Space, with an explicit lifecycle.                        | Active member access, scoped to a society and optionally linked roster record.                                                                                                  |
-| `schema_migration`          | Applied database migration versions.                                                   | Versions `001_auth_registration` through `005_user_profile_avatar`.                                                                                                             |
+| `schema_migration`          | Applied database migration versions.                                                   | Versions `001_auth_registration` through `009_funeral_case_payout_constraint`.                                                                                                  |
 
 ## 4. Registration journey through the tables
 
@@ -266,6 +317,6 @@ Likewise, password hashes do not sit beside profile/address fields, and email/ph
 
 ## 7. Implemented versus future schema
 
-**Implemented by migrations 001-003:** account and profile, contact verification, password-login storage, versioned registration questions/answers, OTP challenge metadata, sessions and auth events; society/Space/onboarding/member records; and session-checked active Space membership listing. The development seed links `testperson` to a separate synthetic member and grants active access for UI testing.
+**Implemented by migrations 001-009:** account and profile, contact verification, password-login storage, versioned registration questions/answers, OTP challenge metadata, sessions and auth events; society/Space/onboarding/member records; session-checked active Space membership; member/covered-life change history; and structured funeral registrations assigned to the Vice Chairperson. The API validates the deceased against the reporting member's active covered lives and enforces role-scoped case decisions. The development seed links `testperson` to a separate synthetic member and grants active access for UI testing.
 
-**Not implemented yet:** a production-verified member-account linking and approval workflow, invitation/join-request handling, role-based authorization for private Society workspace endpoints, contribution ledger, funeral cases, and their operational audit trail. The local synthetic fixture does not establish a production identity or approval process.
+**Not implemented yet:** a production-verified member-account linking and approval workflow, invitation/role administration, contribution ledger, and claim processing. The local synthetic fixture does not establish a production identity or approval process.

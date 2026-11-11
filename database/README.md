@@ -15,7 +15,11 @@ The migration is under the `funeral_spaces` schema and separates data by purpose
 - `space_type`, `registration_form_version`, and `registration_question` define the selected Space category and its versioned extra questions.
 - `society`, `space`, and `society_onboarding_batch` represent a society, its actual Society Space, and an idempotent onboarding/import batch.
 - `society_member`, `covered_life`, `society_office_role`, and `society_office_assignment` hold organization records. Imported members are not platform accounts; `linked_app_user_id` is null unless a separately verified workflow or local synthetic test fixture links it.
-- `space_membership` grants an account active access to a specific Space. It is separate from public discovery and from a roster link; the API requires a live session and an active membership before listing a Space as accessible.
+- `society_record_change` stores actor-attributed before/after JSONB snapshots for member and covered-life create, update, and deactivation operations. Access is restricted by the API to Society member managers.
+- `funeral_case.assigned_to_member_id` routes newly registered cases to the active Vice Chairperson. Members see their own case statuses; authorized officers receive their decision queue and permitted case history. Vice Chairpersons retain visibility of assigned cases after approval.
+- Funeral cases store the deceased's name or ID, date of death, the matching covered-life reference, and a payout bank-detail snapshot. The API accepts a case only when the deceased is an active covered life for the reporting member on the date of death. A separate payout status tracks `not_started`, `in_progress` after approval, and `completed` after an authorized Chairperson or Treasurer confirms payout; completion records the responsible member and timestamp.
+- `space_membership` grants an account active access to a specific Space. When `society_member_id` is set, a database constraint ensures the membership User is the same User linked to that Society member. It is separate from public discovery; the API requires a live session and an active membership before listing a Space as accessible.
+- `platform_admin` stores explicitly granted, revocable platform-admin roles. `platform_admin_audit` records operator grants and narrowly scoped account/member link repairs with before/after snapshots and a required reason. The repair transaction does not create accounts or edit general Society-member data.
 - `society_fee_schedule` stores society-specific, effective-dated amounts as fixed-precision ZAR values. A fee schedule is a policy record, not a payment or contribution ledger.
 - `registration_submission` stores the selected Space type, chosen contact to verify, form version, and registration state. It does **not** create a Space membership.
 - `registration_answer` stores each response as a separate row linked to its exact question and form version.
@@ -49,19 +53,31 @@ psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/
 psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/003_space_membership.sql
 psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/004_society_transparency.sql
 psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/005_user_profile_avatar.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/006_society_member_management.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/007_funeral_case_routing.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/008_funeral_registration_details.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/009_funeral_case_payout_constraint.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/010_funeral_case_covered_life_link.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/011_society_covered_life_limit.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/012_society_membership_account_link.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/013_funeral_case_payout_lifecycle.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/014_platform_admin_repair_workflow.sql
+psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/migrations/015_platform_admin_revocation_audit.sql
 psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/seeds/001_stronger_together_society.sql
 # Optional: requires an existing active testperson / test@email.com account; does not create or reset its password.
 psql "postgresql://localhost/funeral_spaces_dev" -v ON_ERROR_STOP=1 -f database/seeds/002_testperson_active_society.sql
 psql "postgresql://localhost/funeral_spaces_dev" -c 'SELECT version, description, applied_at FROM funeral_spaces.schema_migration ORDER BY version;'
 ```
 
-Run these commands from the repository root in order. Check `funeral_spaces.schema_migration` before applying an already-applied migration. The main demo seed is idempotent and creates Stronger Together Society with 25 active members, 10 deactivated members, 250 active covered lives, six active office assignments, a discoverable Society Space, and a society-specific R250.00 monthly / R1,000.00 joining fee schedule. The separate development-only `002_testperson_active_society.sql` seed links the existing active `testperson` / `test@email.com` account to member `STS-036` and grants it an active Society Space membership. It does not create or reset an app account or password. Both seeds refuse to run unless the current database is named `funeral_spaces_dev`; use synthetic data only in development and tests. Replace the local connection URL for your own PostgreSQL user/database. Do not put production credentials in shell history or project files.
+Run these commands from the repository root in order. Check `funeral_spaces.schema_migration` before applying an already-applied migration. The main demo seed is idempotent and creates Stronger Together Society with 25 active members, 10 deactivated members, 250 active covered lives, six active office assignments, a discoverable Society Space, and a society-specific R250.00 monthly / R1,000.00 joining fee schedule. The separate development-only `002_testperson_active_society.sql` seed links the existing active `testperson` / `test@email.com` account to member `STS-036`, grants it an active Society Space membership, and adds one synthetic covered-life record for funeral workflow testing. It does not create or reset an app account or password. Both seeds refuse to run unless the current database is named `funeral_spaces_dev`; use synthetic data only in development and tests. Replace the local connection URL for your own PostgreSQL user/database. Do not put production credentials in shell history or project files.
+
+Platform-admin grant and revocation are operator-only: from `backend/`, run `npm run admin:grant -- <username-or-verified-email> <reason>` against an existing active account, or `npm run admin:revoke -- <username-or-verified-email> <reason>` to disable an active role. Both commands record before/after state in `platform_admin_audit`; neither can create an account. Do not grant or revoke a role without authorization.
 
 ## Not implemented yet
 
 - Password recovery service and session refresh/rotation.
 - Production-grade distributed rate limiting, monitoring, and authentication/security review.
 - Email/SMS provider, OTP generation/key management/delivery, expiry, retry policy, and delivery-failure handling.
-- CSV upload/review UI, authority verification, production member-account linking, invitations/join requests and approval workflows, and role-based Space permissions. The test account membership is a local synthetic fixture only.
+- CSV upload/review UI, authority verification, production identity verification and hardened operator controls for platform-admin grants/revocations, and production invitation/role administration. The local platform-admin repair only links existing records and refuses pending Society membership requests. The test account membership is a local synthetic fixture only.
 - Contribution/payment ledger, reconciliation, and fee collection. The fee schedule only stores approved amounts and effective dates.
 - Automated migration runner, test database setup, production deployment, backups, retention, and privacy/legal review.
